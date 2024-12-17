@@ -1,0 +1,15 @@
+# Changes here will be overwritten by Copier
+_commit: 2.6.0
+_src_path: gh:DiamondLightSource/python-copier-template
+author_email: richard.cunningham@diamond.ac.uk
+author_name: Richard Cunningham
+description: A PyTorch nn to position i22's bimorph mirror
+distribution_name: i22-bimorph-nn
+docker: true
+docs_type: README
+git_platform: github.com
+github_org: DiamondRC
+package_name: i22_bimorph_nn
+pypi: true
+repo_name: i22-bimorph-nn
+type_checker: mypy
