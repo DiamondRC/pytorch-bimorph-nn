@@ -28,7 +28,7 @@ def gaussian_generator(data_size):
         x = np.random.randint(2000) / 1000
 
         # Corresponding y value using the function y = 4.2*e**(-((x--0.1)**2)/2*1.3**2)
-        y = 4.2 * np.exp(-((x - -0.1) ** 2) / 2 * 1.3**2)
+        y = -3.8 * np.exp(-((x - 0.8) ** 2) / 2 * 2.4**2)
 
         # Append the values to our input and labels lists
         inputs.append([x])
