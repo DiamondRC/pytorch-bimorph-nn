@@ -1,84 +1,112 @@
 #######################################################################
-# Toy problem - position of a circle
+# Toy problem 1 - Approximate a guassian function x to return y
 #######################################################################
 
-import os
-import random
+# https://stackoverflow.com/questions/55920015/how-to-realize-a-polynomial-regression-in-pytorch
 
+import os
+
+import numpy as np
 import torch
+from torch import Tensor
+from torch.autograd import Variable
+from torch.nn import Linear, MSELoss
+from torch.optim import SGD
 
 os.system("clear")
 
-input = torch.Tensor(
-    [random.randint(-100, 100), random.randint(-100, 100), random.randint(-50, 50)]
-)
-fit = torch.Tensor([31, -41, 17])
+
+def gaussian_generator(data_size):
+    # Creates a big dataset of x and y values for the given function.
+    # y = a*e**(-((x-b)**2)/2*c**2)
+    inputs = []
+    labels = []
+
+    # Loop data_size times to generate the data
+    for _ in range(data_size):
+        # Generate x between 0 and 1000
+        x = np.random.randint(2000) / 1000
+
+        # Corresponding y value using the function y = 4.2*e**(-((x--0.1)**2)/2*1.3**2)
+        y = 4.2 * np.exp(-((x - -0.1) ** 2) / 2 * 1.3**2)
+
+        # Append the values to our input and labels lists
+        inputs.append([x])
+        labels.append([y])
+
+    return inputs, labels
 
 
-class CircleMover(torch.nn.Module):
-    def __init__(self, *args, **kwargs):
-        """
-        Instantiate all the parameters of the non-linear function.
-        """
-        super().__init__(*args, **kwargs)
-        self.a = torch.nn.Parameter(torch.randn(()))
-        self.b = torch.nn.Parameter(torch.randn(()))
-        self.c = torch.nn.Parameter(torch.randn(()))
-        self.d = torch.nn.Parameter(torch.randn(()))
-        self.e = torch.nn.Parameter(torch.randn(()))
-        self.f = torch.nn.Parameter(torch.randn(()))
+# define the model
+class Net(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.fc1 = Linear(1, 1)
 
-    def forward(self, input):
-        """
-        In the forward function we accept a tensor of input data and return
-        a tensor of output data.
-        Can use modules defined in the constructor as well as arbitrary operators
-        on Tensors.
-        """
-        input = torch.split(input, 1)
-
-        x = self.a * input[0] + self.b
-        y = self.c * input[1] + self.d
-        r = self.e * input[2] + self.f
-
-        input = torch.Tensor([x, y, r])
-        # return self.a + self.b*x + self.c*y**2 + self.d*z**3
-        return input
-
-    def display(self):
-        # return f'y = {self.a.item()} + {self.b.item()} x \
-        # + {self.c.item()} x^2 + {self.d.item()} x^3 + \
-        # {self.e.item()} x^4 ? + {self.e.item()} x^5 ?'
-        return f"x = {self.a.item()} + {self.b.item()}, \
-            y = {self.c.item()} + {self.d.item()}, \
-            z = {self.e.item()} + {self.f.item()}"
+    def forward(self, x):
+        return self.fc1(x)
 
 
-learning_rate = 1e-8
-# Instantiate our class to create the model.
-model = CircleMover()
+model = Net()
 
-# Will use Mean Squared Error (MSE) as our loss function.
-criterion = torch.nn.MSELoss(reduction="sum")
+# define the loss function
+critereon = MSELoss()
+# define the optimizer
+optimizer = SGD(model.parameters(), lr=0.01)
 
-# Construct the optimiser. Using momentum here.
-optimizer = torch.optim.SGD(model.parameters(), lr=learning_rate, momentum=0.9)
+# define the number of epochs and the data set size
+nb_epochs = 20000
+data_size = 1000
 
-for epoch in range(3000):
-    # Forwards pass - compute y by passing x into the model
-    y_pred = model(input)
+# create our training loop
+for epoch in range(nb_epochs):
+    X, y = gaussian_generator(data_size)
+    X = Variable(Tensor(X))
+    y = Variable(Tensor(y))
+    epoch_loss = 0
+    y_pred = model(X)
+    loss = critereon(y_pred, y)
+    epoch_loss = loss.data
+    if epoch % 1000 == 99:
+        print(f"Epoch: {epoch} Loss: {epoch_loss}")
 
-    # Compute and print loss
-    loss = criterion(y_pred, fit)
-    if epoch % 100 == 99:
-        print(epoch, loss.item())
-
-    # Zero gradients, preform a backwards pass and update the weights.
-    loss.requires_grad = True
+    optimizer.zero_grad()
     loss.backward()
+    optimizer.step()
 
-    with torch.no_grad():
-        for param in model.parameters():
-            param -= learning_rate * param.grad
+# Grab a single piece of test data and pass through the NN.
+# Compare the result to the forumla to determine model accuracy.
+model.eval()
+test_data = gaussian_generator(1)
+prediction = model(Variable(Tensor(test_data[0][0])))
 
-print(f"Target: {fit}, Input: {input}, Params: {model.display()}")
+print("=" * 50)
+print(f"Checking model with x = {test_data[0][0][0]}")
+
+print()
+print(f"Expected: {test_data[1][0][0]}")
+print(f"Prediction: {prediction.data[0]}")
+
+diff = prediction.data[0] - test_data[1][0][0]
+percentage_diff = (abs(diff) / ((prediction.data[0] + test_data[1][0][0]) / 2)) * 100
+
+print()
+print(f"Diff is: {diff}, {abs(percentage_diff):0.2f}%")
+# Get ~10% error on average.
+# Seems inflated by floating point precision.
+print("=" * 50)
+
+
+# x = 0.974: 16.16%
+# x = 0.508: 3.91%
+# x = 0.9: 12.04%
+# x = 1.139: 25.07%
+# x = 1.643: 8.45%
+# x = 0.446: 5.2%
+# x = 0.22: 5.98%
+# x = 0.725: 3.44%
+# x = 0.434: 5.39%
+# x = 0.359: 6.2%
+# x = 0.256: 6.27%
+# x = 0.003: 0.65%
+# x = 1.132: 24.77%
