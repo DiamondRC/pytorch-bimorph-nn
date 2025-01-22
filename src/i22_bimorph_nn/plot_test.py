@@ -1,5 +1,6 @@
 import os
 
+import matplotlib.pyplot as plt
 import numpy as np
 import scipy.optimize as opt
 
@@ -21,7 +22,7 @@ def elliptical_gaussian(x_y: tuple, x0, y0, sigma_x, sigma_y, A, offset, theta):
         -(a * ((x - x0) ** 2) + 2 * b * (x - x0) * (y - y0) + c * ((y - y0) ** 2))
     )
 
-    return g.ravel()
+    return g
 
 
 def calculate_FWHM(xyz_arr, theta):
@@ -59,17 +60,11 @@ def calculate_FWHM(xyz_arr, theta):
 def generate_gaussian2(data_size):
     """Function to fit, returns 2D gaussian function as 1D array"""
 
-    inputs_FWHM = []
-    loss_FWHM = []
-
     # Loop data_size times to generate the data
     for _ in range(data_size):
-        # Generate x between 0 and 1000
-        # x = np.random.randint(2000) / 1000
-
         # Create independant variables
-        x = np.arange(-25, 25, 0.1)
-        y = np.arange(-25, 25, 0.1)
+        x = np.arange(-25, 25, 1)
+        y = np.arange(-25, 25, 1)
 
         # Create the grid
         x, y = np.meshgrid(x, y)
@@ -86,23 +81,33 @@ def generate_gaussian2(data_size):
 
         # Add some noise
         # z += np.random.random(z.shape) / 3
-        z += np.random.random(z.shape)
+        z += np.random.random(z.shape) * 3
+
+        plt.imshow(z, cmap="hot", interpolation="nearest")
+        plt.show()
+
+        # print(z)
+        # print(f"z[0]: {z[0]}")
 
         print(f"FWHM_x (generate_gaussian2) = {2 * np.sqrt(2 * np.log(2)) * sigma_x}")
         print(f"FWHM_y (generate_gaussian2) = {2 * np.sqrt(2 * np.log(2)) * sigma_y}")
 
         # Combine everything
-        xyz_data = np.array([x.ravel(), y.ravel(), z]).T
+        # xyz_data = np.array([x.ravel(), y.ravel(), z]).T
+        # print(xyz_data)
+        # print(xyz_data[0])
 
-        # Corresponding y value using the function
-        inputs = xyz_data
-        loss = calculate_FWHM(xyz_data, theta)
+        # z_data = [data[2] for data in xyz_data]
+        # print(z_data)
+        # print(z_data[0])
 
-        # Append the values to our input and labels lists
-        inputs_FWHM.append([inputs])
-        loss_FWHM.append([loss])
+        # # Corresponding y value using the function
+        # inputs = xyz_data
+        # loss = calculate_FWHM(xyz_data, theta)
 
-    return inputs_FWHM, loss_FWHM
+        # # Append the values to our input and labels lists
+        # inputs_FWHM.append([inputs])
+        # loss_FWHM.append([loss])
 
 
 data_size = 10
