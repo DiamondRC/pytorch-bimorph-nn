@@ -27,7 +27,7 @@ def gaussian_generator(data_size):
         # Generate x between 0 and 1000
         x = np.random.randint(2000) / 1000
 
-        # Corresponding y value using the function y = 4.2*e**(-((x--0.1)**2)/2*1.3**2)
+        # Corresponding y value using the function
         y = -3.8 * np.exp(-((x - 0.8) ** 2) / 2 * 2.4**2)
 
         # Append the values to our input and labels lists
@@ -57,6 +57,7 @@ optimizer = SGD(model.parameters(), lr=0.01)
 # define the number of epochs and the data set size
 nb_epochs = 20000
 data_size = 1000
+
 
 # create our training loop
 for epoch in range(nb_epochs):
@@ -95,18 +96,3 @@ print(f"Diff is: {diff}, {abs(percentage_diff):0.2f}%")
 # Get ~10% error on average.
 # Seems inflated by floating point precision.
 print("=" * 50)
-
-
-# x = 0.974: 16.16%
-# x = 0.508: 3.91%
-# x = 0.9: 12.04%
-# x = 1.139: 25.07%
-# x = 1.643: 8.45%
-# x = 0.446: 5.2%
-# x = 0.22: 5.98%
-# x = 0.725: 3.44%
-# x = 0.434: 5.39%
-# x = 0.359: 6.2%
-# x = 0.256: 6.27%
-# x = 0.003: 0.65%
-# x = 1.132: 24.77%

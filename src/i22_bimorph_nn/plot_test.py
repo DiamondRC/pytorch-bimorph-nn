@@ -6,18 +6,10 @@ import scipy.optimize as opt
 os.system("clear")
 
 
-def generate_gaussian2(x_y: tuple, x0, y0, sigma_x, sigma_y, A, offset, theta=67):
-    """Function to fit, returns 2D gaussian function as 1D array"""
-    x, y = x_y
-    x0 = float(x0)
-    y0 = float(y0)
-
-    # # 2D circular
-    # g = offset + A * np.exp(
-    #     -(((x - x0) ** 2) / (2 * sigma_x**2) + ((y - y0) ** 2) / (2 * sigma_y**2))
-    # )
-
+def elliptical_gaussian(x_y: tuple, x0, y0, sigma_x, sigma_y, A, offset, theta):
     # Elliptical
+    x, y = x_y
+
     a = (np.cos(theta) ** 2) / (2 * sigma_x**2) + (np.sin(theta) ** 2) / (
         2 * sigma_y**2
     )
@@ -29,43 +21,20 @@ def generate_gaussian2(x_y: tuple, x0, y0, sigma_x, sigma_y, A, offset, theta=67
         -(a * ((x - x0) ** 2) + 2 * b * (x - x0) * (y - y0) + c * ((y - y0) ** 2))
     )
 
-    print(f"FWHM_x (generate_gaussian2) = {2 * np.sqrt(2 * np.log(2)) * sigma_x}")
-    print(f"FWHM_y (generate_gaussian2) = {2 * np.sqrt(2 * np.log(2)) * sigma_y}")
-
     return g.ravel()
 
 
-# Create independant variables
-x = np.arange(-100, 100, 0.1)
-y = np.arange(-100, 100, 0.1)
-
-# Create the grid
-x, y = np.meshgrid(x, y)
-
-# Make a Gaussian
-# z = generate_gaussian2((x, y), 0, 0.4, -1.07, 0.8, 1, 0)
-print("called generate_gaussian2")
-z = generate_gaussian2((x, y), -1.05, 1.67, 54, 43, 88, 0)
-# Add some noise
-# z += np.random.random(z.shape) / 3
-z += np.random.random(z.shape)
-
-# Combine everything
-print("combined")
-xyz_data = np.array([x.ravel(), y.ravel(), z]).T
-
-
-def calculate_FWHM(xyz_arr):
+def calculate_FWHM(xyz_arr, theta):
     # Split up the data
     x = xyz_arr[:, 0]
     y = xyz_arr[:, 1]
     z = xyz_arr[:, 2]
-    # Guess parameters: xpos, ypos, sigma_x, simga_y, A, offset.
-    initial_guess = (1, 1, 1, 1, 5, 2)
+    # Guess parameters: x0, y0, sigma_x, simga_y, A, offset, theta.
+    # Cheating with theta do prevent flipping x and y.
+    initial_guess = (1, 1, 40, 40, 60, 2, theta)
 
     # Fit the data
-    popt, pcov = opt.curve_fit(generate_gaussian2, (x, y), z, initial_guess)
-
+    popt, pcov = opt.curve_fit(elliptical_gaussian, (x, y), z, initial_guess)
     # Return properties of the data
     xcenter, ycenter, sigma_x, sigma_y, A, offset = (
         popt[0],
@@ -78,10 +47,6 @@ def calculate_FWHM(xyz_arr):
 
     print(f"xcenter: {xcenter}, ycenter: {ycenter}, A: {A}, offset: {offset}")
 
-    # Use to calculate the FWHM
-    # FWHM_x = np.abs(4 * sigma_x * np.sqrt(-0.05 * np.log(0.5)))
-    # FWHM_y = np.abs(4 * sigma_y * np.sqrt(-0.05 * np.log(0.5)))
-
     FWHM_x = 2 * np.sqrt(2 * np.log(2)) * sigma_x
     FWHM_y = 2 * np.sqrt(2 * np.log(2)) * sigma_y
 
@@ -91,12 +56,54 @@ def calculate_FWHM(xyz_arr):
     return (FWHM_x, FWHM_y)
 
 
-calculate_FWHM(xyz_data)
+def generate_gaussian2(data_size):
+    """Function to fit, returns 2D gaussian function as 1D array"""
+
+    inputs_FWHM = []
+    loss_FWHM = []
+
+    # Loop data_size times to generate the data
+    for _ in range(data_size):
+        # Generate x between 0 and 1000
+        # x = np.random.randint(2000) / 1000
+
+        # Create independant variables
+        x = np.arange(-25, 25, 0.1)
+        y = np.arange(-25, 25, 0.1)
+
+        # Create the grid
+        x, y = np.meshgrid(x, y)
+
+        x0 = -1.05
+        y0 = 1.67
+        sigma_x = 54
+        sigma_y = 43
+        A = 88
+        offset = 0
+        theta = 67
+
+        z = elliptical_gaussian((x, y), x0, y0, sigma_x, sigma_y, A, offset, theta)
+
+        # Add some noise
+        # z += np.random.random(z.shape) / 3
+        z += np.random.random(z.shape)
+
+        print(f"FWHM_x (generate_gaussian2) = {2 * np.sqrt(2 * np.log(2)) * sigma_x}")
+        print(f"FWHM_y (generate_gaussian2) = {2 * np.sqrt(2 * np.log(2)) * sigma_y}")
+
+        # Combine everything
+        xyz_data = np.array([x.ravel(), y.ravel(), z]).T
+
+        # Corresponding y value using the function
+        inputs = xyz_data
+        loss = calculate_FWHM(xyz_data, theta)
+
+        # Append the values to our input and labels lists
+        inputs_FWHM.append([inputs])
+        loss_FWHM.append([loss])
+
+    return inputs_FWHM, loss_FWHM
 
 
-# Have way to create gaussians and calculate their FWHM.
-# Want model which takes gaussians, their parameters and FWHM's.
-# Model should then learn to minimise the FWHM by returning
-# suitable parameters.
-
-# Need to make the guassians deformed.
+data_size = 10
+print(generate_gaussian2(data_size))
