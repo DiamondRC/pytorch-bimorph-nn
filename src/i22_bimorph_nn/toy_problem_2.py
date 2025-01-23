@@ -7,9 +7,10 @@
 # https://gist.github.com/nvladimus/fc88abcece9c3e0dc9212c2adc93bfe7
 
 import os
+import random
 
+import matplotlib.pyplot as plt
 import numpy as np
-import scipy.optimize as opt
 import torch
 from torch import Tensor
 from torch.autograd import Variable
@@ -19,26 +20,8 @@ from torch.optim import SGD
 os.system("clear")
 
 
-# Want to create datasets of 2D Guassians for training.
-# Create model which attempts to minmise the FWHM,
-# for some given Gaussian parameters.
-# Use the Loss function to optimise for this.
-
-
-# Architecture:
-# Generate 2D gaussians.
-# Calculate their FWHM.
-# Tell the model the guassian parameters and the FWHM value.
-# Have minimum beamsize of 150x180.
-# Model learns which values give the smallest FWHM,
-# e.g. if the model is given A and xo, it will find the best yo.
-
-
 def elliptical_gaussian(x_y: tuple, x0, y0, sigma_x, sigma_y, A, offset, theta):
-    # Elliptical Gaussian equation w/ rotation.
-    # Add deformation down the line.
-
-    # Packed for curve_fit
+    # Elliptical
     x, y = x_y
 
     a = (np.cos(theta) ** 2) / (2 * sigma_x**2) + (np.sin(theta) ** 2) / (
@@ -52,120 +35,124 @@ def elliptical_gaussian(x_y: tuple, x0, y0, sigma_x, sigma_y, A, offset, theta):
         -(a * ((x - x0) ** 2) + 2 * b * (x - x0) * (y - y0) + c * ((y - y0) ** 2))
     )
 
-    return g.ravel()
+    return g
 
 
-def calculate_FWHM(xyz_arr, theta):
-    # Split up the data
-    x = xyz_arr[:, 0]
-    y = xyz_arr[:, 1]
-    z = xyz_arr[:, 2]
-
-    # Guess parameters: x0, y0, sigma_x, simga_y, A, offset, theta.
-    # Cheating with theta to prevent flipping x and y.
-    initial_guess = (1, 1, 40, 40, 60, 2, theta)
-
-    # Fit the data
-    popt, pcov = opt.curve_fit(elliptical_gaussian, (x, y), z, initial_guess)
-    # Return properties of the data
-    xcenter, ycenter, sigma_x, sigma_y, A, offset = (
-        popt[0],
-        popt[1],
-        popt[2],
-        popt[3],
-        popt[4],
-        popt[5],
-    )
-
-    print(f"xcenter: {xcenter}, ycenter: {ycenter}, A: {A}, offset: {offset}")
-
-    FWHM_x = 2 * np.sqrt(2 * np.log(2)) * sigma_x
-    FWHM_y = 2 * np.sqrt(2 * np.log(2)) * sigma_y
-
-    # print(f"FWHM_x = {FWHM_x}")
-    # print(f"FWHM_y = {FWHM_y}")
-
-    return (FWHM_x, FWHM_y)
-
-
-def generate_gaussian2(data_size):
+def generate_gaussian2(data_size, debug):
     """Function to fit, returns 2D gaussian function as 1D array"""
 
-    inputs_FWHM = []
-    loss_FWHM = []
+    # Start with some appropriate parameters
+    x0 = random.uniform(-2, 2)
+    y0 = random.uniform(-2, 2)
+    sigma_x = random.uniform(8, 12)
+    sigma_y = sigma_x
+    A = random.uniform(17, 19)
+    offset = random.uniform(-3, 3)
+    theta = random.uniform(50, 70)
 
-    # Loop data_size times to generate the data
-    for _ in range(data_size):
-        # Create independant variables
-        x = np.arange(-50, 50, 1)
-        y = np.arange(-50, 50, 1)
+    if debug:
+        print("RUN PARAMS")
+        print(f"x0 = {x0}")
+        print(f"y0 = {y0}")
+        print(f"sigma_x = {sigma_x}")
+        print(f"sigma_y = {sigma_y}")
+        print(f"A = {A}")
+        print(f"offset = {offset}")
+        print(f"theta = {theta}")
+        print("=" * 20)
 
-        # Create the grid
-        x, y = np.meshgrid(x, y)
+    # Create the grid
+    x, y = np.meshgrid(np.arange(-35, 35, 1), np.arange(-35, 35, 1))
 
-        x0 = -1.05
-        y0 = 1.67
-        sigma_x = 54
-        sigma_y = 43
-        A = 88
-        offset = 0
-        theta = 67
+    # Prepare numpy arrays for export
+    images_out = np.empty(shape=(70, 70, data_size))
+    params_out = np.empty(shape=(2, 1, data_size))
+    full_out = np.empty(shape=(7, 1, data_size))
 
-        z = elliptical_gaussian((x, y), x0, y0, sigma_x, sigma_y, A, offset, theta)
+    # Create gaussian sequence
+    for item in range(data_size):
+        print(f"item: {item}")
+        if item % 2 == 1:
+            x0 += item / 40 * np.cos(item)
+            y0 -= item / 20
+            A += item * np.cos(item) / 4
+        else:
+            x0 -= item / 20 * np.sin(item)
+            y0 += item / 40
+        if item <= 7 and item % 3 == 0:
+            sigma_x += item / 1.3
+        elif item <= 5 and item % 2 == 0:
+            sigma_y += item
+            A += item * np.cos(item) / 4
+        elif item <= 9 and item % 2 == 1:
+            sigma_y += item / 2
+            A += item * np.sin(item) / 4
+        else:
+            sigma_x += item / 8
+            sigma_y += item / 8
+        if item >= 6:
+            A -= 2.5
+        if sigma_x >= sigma_y:
+            offset += np.sin(item * np.cos(item))
+        else:
+            offset += np.sin(item) / 10
+            theta -= 0.1
+
+        # Export images and variables
+        images_out[:, :, item] = elliptical_gaussian(
+            (x, y), x0, y0, sigma_x, sigma_y, A, offset, theta
+        )
+        params_out[:, :, item] = [
+            [2 * np.sqrt(2 * np.log(2)) * sigma_x],
+            [2 * np.sqrt(2 * np.log(2)) * sigma_y],
+        ]
+        full_out[:, :, item] = [
+            [sigma_x],
+            [sigma_y],
+            [x0],
+            [y0],
+            [A],
+            [offset],
+            [theta],
+        ]
 
         # Add some noise
-        # z += np.random.random(z.shape) / 3
-        z += np.random.random(z.shape)
+        images_out[:, :, item] += (
+            np.random.random(np.shape(images_out[:, :, item])) * item / 20
+        )
 
-        # print(f"FWHM_x (generate_gaussian2) = {2 * np.sqrt(2 * np.log(2)) * sigma_x}")
-        # print(f"FWHM_y (generate_gaussian2) = {2 * np.sqrt(2 * np.log(2)) * sigma_y}")
+        if debug:
+            print("REAL")
+            print(
+                f"xcenter: {x0}, ycenter: {y0}, sigma_x: {sigma_x}, \
+sigma_y: {sigma_y}, A: {A}, offset: {offset}"
+            )
+            print(f"FWHM_x (gen_gaussian2) = {2 * np.sqrt(2 * np.log(2)) * sigma_x}")
+            print(f"FWHM_y (gen_gaussian2) = {2 * np.sqrt(2 * np.log(2)) * sigma_y}")
 
-        # Combine everything
-        xyz_data = np.array([x.ravel(), y.ravel(), z]).T
+            # plt.imshow(np.array(z).reshape(50,50), cmap="hot",
+            # interpolation="nearest")
+            plt.subplot(2, data_size // 2, item + 1)
+            plt.imshow(images_out[:, :, item], cmap="hot", interpolation="nearest")
+    if debug:
+        plt.show()
 
-        # Corresponding y value using the function
-        # inputs = xyz_data, x0, y0, sigma_x, sigma_y, A, offset, theta
-        inputs = xyz_data
-        loss = calculate_FWHM(xyz_data, theta)
+    # Reverse order of datasets
+    images_out = np.flip(images_out, 2)
+    params_out = np.flip(params_out, 2)
+    full_out = np.flip(full_out, 2)
 
-        # Append the values to our input and labels lists
-        inputs_FWHM.append([inputs])
-        loss_FWHM.append([loss])
-
-    return inputs_FWHM, loss_FWHM
+    return images_out, params_out, full_out
 
 
 ######################################################
 # Model
 ######################################################
 
-# Analytic 2D gaussian generated.
-# Feed in function parameters as well as grid output.
-# Model will learn about the FWHM.
-#
-# Can compare the learnt FWHM with the analytic
-#
-# Then will give the model some new guassian + info.
-# Model should then return new parameters to generate
-# a gaussian with a tighter FWHM.
-
 
 # define the model
 class Optimise_FWHM(torch.nn.Module):
     def __init__(self):
-        # 6 parameters to define the gaussian.
-        # 2D grid of intensity values.
-
-        # Want out 2 values, the FWHM for both x and y.
-        # super().__init__()
-        # self.fc1 = Linear(in_features=7, out_features=6)
-        # self.fc2 = Linear(in_features=6, out_features=5)
-        # self.fc3 = Linear(in_features=5, out_features=2)
-
-        # super().__init__()
-        # self.layer = torch.nn.Sequential(
-        #    torch.nn.Linear(in_features=3, out_features=2), torch.nn.ReLU()
-        # )
         super().__init__()
         self.fc1 = Linear(in_features=3, out_features=6)
 
@@ -190,7 +177,6 @@ for epoch in range(epochs):
     X, y = generate_gaussian2(data_size)
     X = Variable(Tensor(np.array(X)))
     y = Variable(Tensor(np.array(y)))
-    # y = torch.unsqueeze(y, dim=2)
     epoch_loss = 0
     y_pred = model(X)
     loss = critereon(y_pred, y)
@@ -203,11 +189,11 @@ for epoch in range(epochs):
     optimizer.step()
 
 
-# Grab a single piece of test data and pass through the NN.
-# Compare the result to the forumla to determine model accuracy.
-model.eval()
-test_data = generate_gaussian2(1)
-prediction = model(Variable(Tensor(test_data[0][0])))
+# # Grab a single piece of test data and pass through the NN.
+# # Compare the result to the forumla to determine model accuracy.
+# model.eval()
+# test_data = generate_gaussian2(1)
+# prediction = model(Variable(Tensor(test_data[0][0])))
 
-print(test_data)
-print(prediction)
+# print(test_data)
+# print(prediction)
