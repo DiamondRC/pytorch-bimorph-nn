@@ -82,9 +82,9 @@ def generate_gaussian2(data_size, debug):
     x, y = np.meshgrid(np.arange(-35, 35, 1), np.arange(-35, 35, 1))
 
     # Prepare numpy arrays for export
-    images_out = np.empty(shape=(70, 70, data_size))
-    params_out = np.empty(shape=(2, 1, data_size))
-    full_out = np.empty(shape=(7, 1, data_size))
+    images_out = np.empty(shape=(data_size, 1, 70, 70))
+    params_out = np.empty(shape=(data_size, 2, 1))
+    full_out = np.empty(shape=(data_size, 7, 1))
 
     # Create gaussian sequence
     for item in range(data_size):
@@ -116,11 +116,14 @@ def generate_gaussian2(data_size, debug):
             theta -= 0.1
 
         # Export images and variables
-        images_out[:, :, item] = elliptical_gaussian(
+        images_out[item, 0, :, :] = elliptical_gaussian(
             (x, y), x0, y0, sigma_x, sigma_y, A, offset, theta
         )
-        params_out[:, :, item] = [[sigma_x], [sigma_y]]
-        full_out[:, :, item] = [
+        params_out[item, :, :] = [
+            [2 * np.sqrt(2 * np.log(2)) * sigma_x],
+            [2 * np.sqrt(2 * np.log(2)) * sigma_y],
+        ]
+        full_out[item, :, :] = [
             [sigma_x],
             [sigma_y],
             [x0],
@@ -131,8 +134,8 @@ def generate_gaussian2(data_size, debug):
         ]
 
         # Add some noise
-        images_out[:, :, item] += (
-            np.random.random(np.shape(images_out[:, :, item])) * item / 20
+        images_out[item, 0, :, :] += (
+            np.random.random(np.shape(images_out[item, 0, :, :])) * item / 20
         )
 
         # calculate_FWHM(x, y, z)
@@ -148,10 +151,15 @@ sigma_y: {sigma_y}, A: {A}, offset: {offset}"
 
             # plt.imshow(np.array(z).reshape(50,50), cmap="hot",
             # interpolation="nearest")
-            plt.subplot(2, 5, item + 1)
-            plt.imshow(images_out[:, :, item], cmap="hot", interpolation="nearest")
+            plt.subplot(2, data_size // 2, item + 1)
+            plt.imshow(images_out[item, 0, :, :], cmap="hot", interpolation="nearest")
     if debug:
         plt.show()
+
+    # Reverse order of datasets
+    images_out = np.flip(images_out, 0)
+    params_out = np.flip(params_out, 0)
+    full_out = np.flip(full_out, 0)
 
     return images_out, params_out, full_out
 
