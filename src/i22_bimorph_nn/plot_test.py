@@ -22,7 +22,6 @@ def elliptical_gaussian(x_y: tuple, x0, y0, sigma_x, sigma_y, A, offset, theta):
         -(a * ((x - x0) ** 2) + 2 * b * (x - x0) * (y - y0) + c * ((y - y0) ** 2))
     )
 
-    # return g.flatten()
     return g
 
 
@@ -59,14 +58,7 @@ def elliptical_gaussian(x_y: tuple, x0, y0, sigma_x, sigma_y, A, offset, theta):
 def generate_gaussian2(data_size, debug):
     """Function to fit, returns 2D gaussian function as 1D array"""
 
-    # x0 = -1.05
-    # y0 = 1.67
-    # sigma_x = 10
-    # sigma_y = 10
-    # A = 20
-    # offset = 0
-    # theta = 67
-
+    # Start with some appropriate parameters
     x0 = random.uniform(-2, 2)
     y0 = random.uniform(-2, 2)
     sigma_x = random.uniform(8, 12)
@@ -86,32 +78,17 @@ def generate_gaussian2(data_size, debug):
         print(f"theta = {theta}")
         print("=" * 20)
 
-    # Create independant variables
-    x = np.arange(-35, 35, 1)
-    y = np.arange(-35, 35, 1)
-
     # Create the grid
-    x, y = np.meshgrid(x, y)
+    x, y = np.meshgrid(np.arange(-35, 35, 1), np.arange(-35, 35, 1))
 
-    # images_out = np.empty(shape=(70,70,data_size))
-    # params_out = np.empty(shape=(2,1,data_size))
-    # Want to export array with ten items in reverse order
-    # Each item contains np.array of size (70,70)
-    # Also want to give model parameters of 'beam':
-    # sigma_x
-    # sigma_y
-    # e.g. (2,1)
+    # Prepare numpy arrays for export
+    images_out = np.empty(shape=(70, 70, data_size))
+    params_out = np.empty(shape=(2, 1, data_size))
+    full_out = np.empty(shape=(7, 1, data_size))
 
-    # Loop data_size times to generate the data
+    # Create gaussian sequence
     for item in range(data_size):
-        # x0 += random.uniform(-1/2,1/2)
-        # y0 += random.uniform(-1/2,1/2)
-        # sigma_x += random.uniform(item/4,item)
-        # sigma_y += random.uniform(item/4,item)
-        # A += item*np.cos(item)/4
-        # offset += random.uniform(-1,1)
-        # theta += random.uniform(-5,5)
-
+        print(f"item: {item}")
         if item % 2 == 1:
             x0 += item / 40 * np.cos(item)
             y0 -= item / 20
@@ -138,11 +115,25 @@ def generate_gaussian2(data_size, debug):
             offset += np.sin(item) / 10
             theta -= 0.1
 
-        z = elliptical_gaussian((x, y), x0, y0, sigma_x, sigma_y, A, offset, theta)
+        # Export images and variables
+        images_out[:, :, item] = elliptical_gaussian(
+            (x, y), x0, y0, sigma_x, sigma_y, A, offset, theta
+        )
+        params_out[:, :, item] = [[sigma_x], [sigma_y]]
+        full_out[:, :, item] = [
+            [sigma_x],
+            [sigma_y],
+            [x0],
+            [y0],
+            [A],
+            [offset],
+            [theta],
+        ]
 
         # Add some noise
-        # z += np.random.random(z.shape) / 3
-        z += np.random.random(z.shape) * item / 20
+        images_out[:, :, item] += (
+            np.random.random(np.shape(images_out[:, :, item])) * item / 20
+        )
 
         # calculate_FWHM(x, y, z)
 
@@ -158,21 +149,12 @@ sigma_y: {sigma_y}, A: {A}, offset: {offset}"
             # plt.imshow(np.array(z).reshape(50,50), cmap="hot",
             # interpolation="nearest")
             plt.subplot(2, 5, item + 1)
-            plt.imshow(z, cmap="hot", interpolation="nearest")
+            plt.imshow(images_out[:, :, item], cmap="hot", interpolation="nearest")
     if debug:
         plt.show()
 
-    return images_out, params_out
+    return images_out, params_out, full_out
 
 
 data_size = 10
-images_out, params_out = generate_gaussian2(data_size, debug=True)
-
-
-print(np.shape(images_out))
-print(np.shape(params_out))
-
-print(params_out[:, :, 3])
-print()
-
-# print(array_out[:][:][11])
+images_out, params_out, full_out = generate_gaussian2(data_size, debug=True)
