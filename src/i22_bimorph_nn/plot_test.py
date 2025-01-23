@@ -83,12 +83,24 @@ def generate_gaussian2(data_size, debug):
 
     # Prepare numpy arrays for export
     images_out = np.empty(shape=(data_size, 1, 70, 70))
-    params_out = np.empty(shape=(data_size, 2, 1))
-    full_out = np.empty(shape=(data_size, 7, 1))
+    params_out = np.empty(shape=(data_size, 7, 1))
+    truth_out = np.empty(shape=(1, 7, 1))
 
-    # Create gaussian sequence
+    # Fill with initial values
+    truth_out[0, :, :] = [
+        [sigma_x],
+        [sigma_y],
+        [x0],
+        [y0],
+        [A],
+        [offset],
+        [theta],
+    ]
+
+    # Deviate gaussian
     for item in range(data_size):
-        print(f"item: {item}")
+        # Non-linear, reproducible 'mirror deviation'
+        # Model will learn this equation.
         if item % 2 == 1:
             x0 += item / 40 * np.cos(item)
             y0 -= item / 20
@@ -120,10 +132,6 @@ def generate_gaussian2(data_size, debug):
             (x, y), x0, y0, sigma_x, sigma_y, A, offset, theta
         )
         params_out[item, :, :] = [
-            [2 * np.sqrt(2 * np.log(2)) * sigma_x],
-            [2 * np.sqrt(2 * np.log(2)) * sigma_y],
-        ]
-        full_out[item, :, :] = [
             [sigma_x],
             [sigma_y],
             [x0],
@@ -159,10 +167,9 @@ sigma_y: {sigma_y}, A: {A}, offset: {offset}"
     # Reverse order of datasets
     images_out = np.flip(images_out, 0)
     params_out = np.flip(params_out, 0)
-    full_out = np.flip(full_out, 0)
 
-    return images_out, params_out, full_out
+    return images_out, params_out, truth_out
 
 
 data_size = 10
-images_out, params_out, full_out = generate_gaussian2(data_size, debug=True)
+images_out, params_out, truth_out = generate_gaussian2(data_size, debug=True)
