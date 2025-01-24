@@ -55,17 +55,8 @@ def elliptical_gaussian(x_y: tuple, x0, y0, sigma_x, sigma_y, A, offset, theta):
 #     return (FWHM_x, FWHM_y)
 
 
-def generate_gaussian2(data_size, debug):
+def generate_gaussian2(x0, y0, sigma_x, sigma_y, A, offset, theta, data_size, debug):
     """Function to fit, returns 2D gaussian function as 1D array"""
-
-    # Start with some appropriate parameters
-    x0 = random.uniform(-2, 2)
-    y0 = random.uniform(-2, 2)
-    sigma_x = random.uniform(8, 12)
-    sigma_y = sigma_x
-    A = random.uniform(17, 19)
-    offset = random.uniform(-3, 3)
-    theta = random.uniform(50, 70)
 
     if debug:
         print("RUN PARAMS")
@@ -83,7 +74,8 @@ def generate_gaussian2(data_size, debug):
 
     # Prepare numpy arrays for export
     images_out = np.empty(shape=(data_size, 1, 70, 70))
-    params_out = np.empty(shape=(data_size, 7, 1))
+    params_out = np.empty(shape=(data_size, 2, 1))
+    channels_out = np.empty(shape=(data_size, 5, 1))
     truth_out = np.empty(shape=(1, 7, 1))
 
     # Fill with initial values
@@ -134,6 +126,9 @@ def generate_gaussian2(data_size, debug):
         params_out[item, :, :] = [
             [sigma_x],
             [sigma_y],
+        ]
+
+        channels_out[item, :, :] = [
             [x0],
             [y0],
             [A],
@@ -152,7 +147,7 @@ def generate_gaussian2(data_size, debug):
             print("REAL")
             print(
                 f"xcenter: {x0}, ycenter: {y0}, sigma_x: {sigma_x}, \
-sigma_y: {sigma_y}, A: {A}, offset: {offset}"
+sigma_y: {sigma_y}, A: {A}, offset: {offset}, theta: {theta}"
             )
             print(f"FWHM_x (gen_gaussian2) = {2 * np.sqrt(2 * np.log(2)) * sigma_x}")
             print(f"FWHM_y (gen_gaussian2) = {2 * np.sqrt(2 * np.log(2)) * sigma_y}")
@@ -167,9 +162,22 @@ sigma_y: {sigma_y}, A: {A}, offset: {offset}"
     # Reverse order of datasets
     images_out = np.flip(images_out, 0)
     params_out = np.flip(params_out, 0)
+    channels_out = np.flip(channels_out, 0)
+    truth_out = np.flip(channels_out, 0)
 
-    return images_out, params_out, truth_out
+    return images_out, params_out, channels_out, truth_out
 
 
+# Start with some appropriate parameters
+x0 = random.uniform(-2, 2)
+y0 = random.uniform(-2, 2)
+sigma_x = random.uniform(8, 12)
+sigma_y = sigma_x
+A = random.uniform(17, 19)
+offset = random.uniform(-3, 3)
+theta = random.uniform(50, 70)
 data_size = 10
-images_out, params_out, truth_out = generate_gaussian2(data_size, debug=True)
+
+images_out, params_out, channels_out, truth_out = generate_gaussian2(
+    x0, y0, sigma_x, sigma_y, A, offset, theta, data_size, debug=True
+)
