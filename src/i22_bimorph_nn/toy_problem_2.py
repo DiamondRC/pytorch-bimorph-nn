@@ -9,12 +9,13 @@
 import os
 import random
 
-import matplotlib.pyplot as plt
+# import matplotlib.pyplot as plt
 import numpy as np
 import torch
+import torch.share
 from torch import Tensor
 from torch.autograd import Variable
-from torch.nn import Linear, MSELoss
+from torch.nn import MSELoss
 from torch.optim import SGD
 
 os.system("clear")
@@ -38,17 +39,8 @@ def elliptical_gaussian(x_y: tuple, x0, y0, sigma_x, sigma_y, A, offset, theta):
     return g
 
 
-def generate_gaussian2(data_size, debug):
+def generate_gaussian2(x0, y0, sigma_x, sigma_y, A, offset, theta, data_size, debug):
     """Function to fit, returns 2D gaussian function as 1D array"""
-
-    # Start with some appropriate parameters
-    x0 = random.uniform(-2, 2)
-    y0 = random.uniform(-2, 2)
-    sigma_x = random.uniform(8, 12)
-    sigma_y = sigma_x
-    A = random.uniform(17, 19)
-    offset = random.uniform(-3, 3)
-    theta = random.uniform(50, 70)
 
     if debug:
         print("RUN PARAMS")
@@ -65,13 +57,20 @@ def generate_gaussian2(data_size, debug):
     x, y = np.meshgrid(np.arange(-35, 35, 1), np.arange(-35, 35, 1))
 
     # Prepare numpy arrays for export
-    images_out = np.empty(shape=(70, 70, data_size))
-    params_out = np.empty(shape=(2, 1, data_size))
-    full_out = np.empty(shape=(7, 1, data_size))
+    images_out = np.empty(shape=(data_size, 1, 70, 70))
+    params_out = np.empty(shape=(data_size, 1, 2))
+    channels_out = np.empty(shape=(data_size, 1, 5))
+    truth_out = np.empty(shape=(1, 1, 7))
 
-    # Create gaussian sequence
+    # Fill with initial values
+    truth_out[0, :, :] = [
+        [sigma_x, sigma_y, x0, y0, A, offset, theta],
+    ]
+
+    # Deviate gaussian
     for item in range(data_size):
-        print(f"item: {item}")
+        # Non-linear, reproducible 'mirror deviation'
+        # Model will learn this equation.
         if item % 2 == 1:
             x0 += item / 40 * np.cos(item)
             y0 -= item / 20
@@ -99,50 +98,44 @@ def generate_gaussian2(data_size, debug):
             theta -= 0.1
 
         # Export images and variables
-        images_out[:, :, item] = elliptical_gaussian(
+        images_out[item, 0, :, :] = elliptical_gaussian(
             (x, y), x0, y0, sigma_x, sigma_y, A, offset, theta
         )
-        params_out[:, :, item] = [
-            [2 * np.sqrt(2 * np.log(2)) * sigma_x],
-            [2 * np.sqrt(2 * np.log(2)) * sigma_y],
+        params_out[item, :, :] = [
+            [sigma_x, sigma_y],
         ]
-        full_out[:, :, item] = [
-            [sigma_x],
-            [sigma_y],
-            [x0],
-            [y0],
-            [A],
-            [offset],
-            [theta],
+
+        channels_out[item, :, :] = [
+            [x0, y0, A, offset, theta],
         ]
 
         # Add some noise
-        images_out[:, :, item] += (
-            np.random.random(np.shape(images_out[:, :, item])) * item / 20
+        images_out[item, 0, :, :] += (
+            np.random.random(np.shape(images_out[item, 0, :, :])) * item / 20
         )
 
-        if debug:
-            print("REAL")
-            print(
-                f"xcenter: {x0}, ycenter: {y0}, sigma_x: {sigma_x}, \
-sigma_y: {sigma_y}, A: {A}, offset: {offset}"
-            )
-            print(f"FWHM_x (gen_gaussian2) = {2 * np.sqrt(2 * np.log(2)) * sigma_x}")
-            print(f"FWHM_y (gen_gaussian2) = {2 * np.sqrt(2 * np.log(2)) * sigma_y}")
-
-            # plt.imshow(np.array(z).reshape(50,50), cmap="hot",
-            # interpolation="nearest")
-            plt.subplot(2, data_size // 2, item + 1)
-            plt.imshow(images_out[:, :, item], cmap="hot", interpolation="nearest")
-    if debug:
-        plt.show()
+    #     if debug:
+    #         print("REAL")
+    #         print(
+    #             f"xcenter: {x0}, ycenter: {y0}, sigma_x: {sigma_x}, \
+    # sigma_y: {sigma_y}, A: {A}, offset: {offset}, theta: {theta}"
+    #             )
+    #         print(f"FWHM_x (gen_gaussian2) = {2 * np.sqrt(2 * np.log(2)) * sigma_x}")
+    #         print(f"FWHM_y (gen_gaussian2) = {2 * np.sqrt(2 * np.log(2)) * sigma_y}")
+    #         # plt.imshow(np.array(z).reshape(50,50), cmap="hot",
+    #         # interpolation="nearest")
+    #         plt.subplot(2, data_size // 2, item + 1)
+    #         plt.imshow(images_out[item, 0, :, :], cmap="hot", interpolation="nearest")
+    # if debug:
+    #     plt.show()
 
     # Reverse order of datasets
-    images_out = np.flip(images_out, 2)
-    params_out = np.flip(params_out, 2)
-    full_out = np.flip(full_out, 2)
+    images_out = np.flip(images_out, 0)
+    params_out = np.flip(params_out, 0)
+    channels_out = np.flip(channels_out, 0)
+    truth_out = np.flip(channels_out, 0)
 
-    return images_out, params_out, full_out
+    return images_out, params_out, channels_out, truth_out
 
 
 ######################################################
@@ -154,10 +147,78 @@ sigma_y: {sigma_y}, A: {A}, offset: {offset}"
 class Optimise_FWHM(torch.nn.Module):
     def __init__(self):
         super().__init__()
-        self.fc1 = Linear(in_features=3, out_features=6)
+        # in_channels = C_in, e.g. 1 for greyscale, size out = 61
+        self.conv = torch.nn.Conv2d(in_channels=1, out_channels=1, kernel_size=(10, 10))
+        # Add non-linearity then pool
+        self.relu = torch.nn.ReLU()
+        # 2x2 w/ stride 2 halves each dim, 6x6 -> 3x3 etc.
+        self.pool = torch.nn.MaxPool2d(kernel_size=(2, 2), stride=(2, 2))
+        # Now flatten the result to match parameters we want to learn
+        # start/end dim are the tensor dimensions to squish
+        self.flat1 = torch.nn.Flatten(start_dim=2, end_dim=3)
 
-    def forward(self, x):
-        return self.layer(x)
+        # Compress result to match the input 'channels'
+        self.fc1 = torch.nn.Linear(in_features=100, out_features=7)
+        # Fuse 'channel' params with image
+        self.fc2 = torch.nn.Linear(in_features=14, out_features=7)
+
+        # Combine all images in the batch.
+        self.flat2 = torch.nn.Flatten(start_dim=0, end_dim=2)
+        # Return
+        self.fc3 = torch.nn.Linear(in_features=70, out_features=7)
+
+    def forward(self, image, params, channels):
+        img1 = self.conv(image)
+        # print(img1.size())
+        # [10, 1, 61, 61]
+        img2 = self.relu(img1)
+
+        img3 = self.pool(img2)
+        # [10, 1, 30, 30]
+        # print(img3.size())
+
+        img4 = self.conv(img3)
+        # print(img4.size())
+        # [10, 1, 21, 21]
+        img5 = self.relu(img4)
+
+        img6 = self.pool(img5)
+        # [10, 1, 10, 10]
+        # print(img6.size())
+
+        img7 = self.flat1(img6)
+        # [10, 1, 100]
+        # print(img7.size())
+
+        # print()
+        img8 = self.fc1(img7)
+        img8 = self.relu(img8)
+        # [10, 1, 7]
+        # print(f"img8: {img8.size()}")
+
+        all_params = torch.cat((params, channels), 2)
+        # [10, 1, 7]
+        # print(f"all_params: {all_params.size()}")
+
+        fuse_img_n_params = torch.cat((img8, all_params), 2)
+        # [10, 1, 14]
+        # print(fuse_img_n_params.size())
+
+        combined_params = self.fc2(fuse_img_n_params)
+        combined_params = self.relu(combined_params)
+        # [10, 1, 7]
+        # print(combined_params.size())
+
+        combined_imgs = self.flat2(combined_params)
+        # [70]
+        # print(combined_imgs.size())
+
+        out = self.fc3(combined_imgs)
+        # out = self.relu(out)
+
+        # print(out)
+
+        return out
 
 
 model = Optimise_FWHM()
@@ -165,22 +226,57 @@ model = Optimise_FWHM()
 # define the loss function
 critereon = MSELoss()
 # define the optimizer
-optimizer = SGD(model.parameters(), lr=0.01)
+optimizer = SGD(model.parameters(), lr=0.001)
 
 # define the number of epochs and the data set size
-epochs = 2000
+epochs = 20000
 data_size = 10
 
 
 # create our training loop
 for epoch in range(epochs):
-    X, y = generate_gaussian2(data_size)
-    X = Variable(Tensor(np.array(X)))
-    y = Variable(Tensor(np.array(y)))
+    # Start with some appropriate parameters
+    x0 = random.uniform(-2, 2)
+    y0 = random.uniform(-2, 2)
+    sigma_x = random.uniform(8, 12)
+    sigma_y = sigma_x
+    A = random.uniform(17, 19)
+    offset = random.uniform(-3, 3)
+    theta = random.uniform(50, 70)
+    data_size = 10
+
+    images_out, params_out, channels_out, truth_out = generate_gaussian2(
+        x0, y0, sigma_x, sigma_y, A, offset, theta, data_size, debug=False
+    )
+    image = Variable(Tensor(images_out.copy()))
+    params = Variable(Tensor(params_out.copy()))
+    channels = Variable(Tensor(channels_out.copy()))
     epoch_loss = 0
-    y_pred = model(X)
-    loss = critereon(y_pred, y)
+
+    # Pass image and 'channels' into model
+    # to get predicted next channel config.
+    y_pred = model(image, params, channels)
+
+    # Create synthetic image from model to determine preformance.
+    image_pred = generate_gaussian2(
+        x0=y_pred[0].detach().numpy(),
+        y0=y_pred[1].detach().numpy(),
+        sigma_x=y_pred[2].detach().numpy(),
+        sigma_y=y_pred[3].detach().numpy(),
+        A=y_pred[4].detach().numpy(),
+        offset=y_pred[5].detach().numpy(),
+        theta=y_pred[6].detach().numpy(),
+        data_size=1,
+        debug=False,
+    )[0]
+
+    # Check the image predicted by the model
+    # against the known good image.
+    image_pred = Variable(Tensor(image_pred.copy()), requires_grad=True)
+    loss = critereon(image[-1][0], image_pred[-1][0])
     epoch_loss = loss.data
+
+    # Visualise
     if epoch % 1000 == 99:
         print(f"Epoch: {epoch} Loss: {epoch_loss}")
 
@@ -188,12 +284,7 @@ for epoch in range(epochs):
     loss.backward()
     optimizer.step()
 
-
-# # Grab a single piece of test data and pass through the NN.
-# # Compare the result to the forumla to determine model accuracy.
-# model.eval()
-# test_data = generate_gaussian2(1)
-# prediction = model(Variable(Tensor(test_data[0][0])))
-
-# print(test_data)
-# print(prediction)
+# Now want to test model with unseen data.
+# Generate some new params and give them to the model,
+# compare against the analytic value.
+# Visually display both for easy comparison.
