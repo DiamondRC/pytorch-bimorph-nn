@@ -9,7 +9,7 @@
 import os
 import random
 
-# import matplotlib.pyplot as plt
+import matplotlib.pyplot as plt
 import numpy as np
 import torch
 import torch.share
@@ -41,17 +41,6 @@ def elliptical_gaussian(x_y: tuple, x0, y0, sigma_x, sigma_y, A, offset, theta):
 
 def generate_gaussian2(x0, y0, sigma_x, sigma_y, A, offset, theta, data_size, debug):
     """Function to fit, returns 2D gaussian function as 1D array"""
-
-    if debug:
-        print("RUN PARAMS")
-        print(f"x0 = {x0}")
-        print(f"y0 = {y0}")
-        print(f"sigma_x = {sigma_x}")
-        print(f"sigma_y = {sigma_y}")
-        print(f"A = {A}")
-        print(f"offset = {offset}")
-        print(f"theta = {theta}")
-        print("=" * 20)
 
     # Create the grid
     x, y = np.meshgrid(np.arange(-35, 35, 1), np.arange(-35, 35, 1))
@@ -114,20 +103,11 @@ def generate_gaussian2(x0, y0, sigma_x, sigma_y, A, offset, theta, data_size, de
             np.random.random(np.shape(images_out[item, 0, :, :])) * item / 20
         )
 
-    #     if debug:
-    #         print("REAL")
-    #         print(
-    #             f"xcenter: {x0}, ycenter: {y0}, sigma_x: {sigma_x}, \
-    # sigma_y: {sigma_y}, A: {A}, offset: {offset}, theta: {theta}"
-    #             )
-    #         print(f"FWHM_x (gen_gaussian2) = {2 * np.sqrt(2 * np.log(2)) * sigma_x}")
-    #         print(f"FWHM_y (gen_gaussian2) = {2 * np.sqrt(2 * np.log(2)) * sigma_y}")
-    #         # plt.imshow(np.array(z).reshape(50,50), cmap="hot",
-    #         # interpolation="nearest")
-    #         plt.subplot(2, data_size // 2, item + 1)
-    #         plt.imshow(images_out[item, 0, :, :], cmap="hot", interpolation="nearest")
-    # if debug:
-    #     plt.show()
+        if debug:
+            plt.subplot(2, data_size // 2, item + 1)
+            plt.imshow(images_out[item, 0, :, :], cmap="hot", interpolation="nearest")
+    if debug:
+        plt.show()
 
     # Reverse order of datasets
     images_out = np.flip(images_out, 0)
@@ -224,9 +204,9 @@ class Optimise_FWHM(torch.nn.Module):
 model = Optimise_FWHM()
 
 # define the loss function
-critereon = MSELoss()
+critereon = MSELoss(reduction="sum")
 # define the optimizer
-optimizer = SGD(model.parameters(), lr=0.001)
+optimizer = SGD(model.parameters(), lr=0.00001)
 
 # define the number of epochs and the data set size
 epochs = 20000
@@ -273,7 +253,7 @@ for epoch in range(epochs):
     # Check the image predicted by the model
     # against the known good image.
     image_pred = Variable(Tensor(image_pred.copy()), requires_grad=True)
-    loss = critereon(image[-1][0], image_pred[-1][0])
+    loss = critereon(image_pred[:][0], image[:][0])
     epoch_loss = loss.data
 
     # Visualise
@@ -288,3 +268,96 @@ for epoch in range(epochs):
 # Generate some new params and give them to the model,
 # compare against the analytic value.
 # Visually display both for easy comparison.
+
+print("-" * 45)
+
+x0 = random.uniform(-2, 2)
+y0 = random.uniform(-2, 2)
+sigma_x = random.uniform(8, 12)
+sigma_y = sigma_x
+A = random.uniform(17, 19)
+offset = random.uniform(-3, 3)
+theta = random.uniform(50, 70)
+data_size = 10
+
+print()
+print("=" * 45)
+print("TEST PARAMS:")
+print(f"x0 = {x0}")
+print(f"y0 = {y0}")
+print(f"sigma_x = {sigma_x}")
+print(f"sigma_y = {sigma_y}")
+print(f"A = {A}")
+print(f"offset = {offset}")
+print(f"theta = {theta}")
+print(f"FWHM_x (Real) = {2 * np.sqrt(2 * np.log(2)) * sigma_x}")
+print(f"FWHM_y (Real) = {2 * np.sqrt(2 * np.log(2)) * sigma_y}")
+print()
+
+model.eval()
+images_out, params_out, channels_out, truth_out = generate_gaussian2(
+    x0, y0, sigma_x, sigma_y, A, offset, theta, data_size, debug=True
+)
+
+image = Variable(Tensor(images_out.copy()))
+params = Variable(Tensor(params_out.copy()))
+channels = Variable(Tensor(channels_out.copy()))
+prediction = model(image, params, channels)
+
+predicted_image = generate_gaussian2(
+    prediction[0].detach().numpy(),
+    prediction[1].detach().numpy(),
+    prediction[2].detach().numpy(),
+    prediction[3].detach().numpy(),
+    prediction[4].detach().numpy(),
+    prediction[5].detach().numpy(),
+    prediction[6].detach().numpy(),
+    data_size,
+    debug=False,
+)
+
+
+print("MODEL PARAMS:")
+print(f"x0 = {prediction[0]}")
+print(f"y0 = {prediction[1]}")
+print(f"sigma_x = {prediction[2]}")
+print(f"sigma_y = {prediction[3]}")
+print(f"A = {prediction[4]}")
+print(f"offset = {prediction[5]}")
+print(f"theta = {prediction[6]}")
+print(f"FWHM_x (Model) = {2 * np.sqrt(2 * np.log(2)) * prediction[2]}")
+print(f"FWHM_y (Model) = {2 * np.sqrt(2 * np.log(2)) * prediction[3]}")
+print("=" * 45)
+print()
+
+plt.subplot(1, 3, 1)
+plt.imshow(
+    images_out[-1][0],
+    cmap="hot",
+    interpolation="nearest",
+    vmin=np.min(images_out[-1][0]),
+    vmax=np.max(images_out[-1][0]),
+)
+plt.title("Expected")
+
+plt.subplot(1, 3, 2)
+plt.imshow(
+    predicted_image[0][0, 0, :, :],
+    cmap="hot",
+    interpolation="nearest",
+    vmin=np.min(images_out[-1][0]),
+    vmax=np.max(images_out[-1][0]),
+)
+plt.title("Model")
+
+plt.subplot(1, 3, 3)
+plt.imshow(
+    images_out[-1][0] - predicted_image[0][0, 0, :, :],
+    cmap="hot",
+    interpolation="nearest",
+    vmin=np.min(images_out[-1][0]),
+    vmax=np.max(images_out[-1][0]),
+)
+plt.title("Diff")
+
+plt.show()
