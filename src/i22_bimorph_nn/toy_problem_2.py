@@ -16,7 +16,8 @@ import torch.share
 from torch import Tensor
 from torch.autograd import Variable
 from torch.nn import MSELoss
-from torch.optim import SGD
+
+# from torch.optim import SGD
 
 os.system("clear")
 
@@ -47,12 +48,11 @@ def generate_gaussian2(x0, y0, sigma_x, sigma_y, A, offset, theta, data_size, de
 
     # Prepare numpy arrays for export
     images_out = np.empty(shape=(data_size, 1, 70, 70))
-    params_out = np.empty(shape=(data_size, 1, 2))
-    channels_out = np.empty(shape=(data_size, 1, 5))
+    params_out = np.empty(shape=(data_size, 1, 7))
     truth_out = np.empty(shape=(1, 1, 7))
 
     # Fill with initial values
-    truth_out[0, :, :] = [
+    truth_out[:, 0, :] = [
         [sigma_x, sigma_y, x0, y0, A, offset, theta],
     ]
 
@@ -91,11 +91,7 @@ def generate_gaussian2(x0, y0, sigma_x, sigma_y, A, offset, theta, data_size, de
             (x, y), x0, y0, sigma_x, sigma_y, A, offset, theta
         )
         params_out[item, :, :] = [
-            [sigma_x, sigma_y],
-        ]
-
-        channels_out[item, :, :] = [
-            [x0, y0, A, offset, theta],
+            [x0, y0, sigma_x, sigma_y, A, offset, theta],
         ]
 
         # Add some noise
@@ -112,10 +108,8 @@ def generate_gaussian2(x0, y0, sigma_x, sigma_y, A, offset, theta, data_size, de
     # Reverse order of datasets
     images_out = np.flip(images_out, 0)
     params_out = np.flip(params_out, 0)
-    channels_out = np.flip(channels_out, 0)
-    truth_out = np.flip(channels_out, 0)
 
-    return images_out, params_out, channels_out, truth_out
+    return images_out, params_out, truth_out
 
 
 ######################################################
@@ -127,76 +121,22 @@ def generate_gaussian2(x0, y0, sigma_x, sigma_y, A, offset, theta, data_size, de
 class Optimise_FWHM(torch.nn.Module):
     def __init__(self):
         super().__init__()
-        # in_channels = C_in, e.g. 1 for greyscale, size out = 61
-        self.conv = torch.nn.Conv2d(in_channels=1, out_channels=1, kernel_size=(10, 10))
-        # Add non-linearity then pool
-        self.relu = torch.nn.ReLU()
-        # 2x2 w/ stride 2 halves each dim, 6x6 -> 3x3 etc.
-        self.pool = torch.nn.MaxPool2d(kernel_size=(2, 2), stride=(2, 2))
-        # Now flatten the result to match parameters we want to learn
-        # start/end dim are the tensor dimensions to squish
-        self.flat1 = torch.nn.Flatten(start_dim=2, end_dim=3)
 
-        # Compress result to match the input 'channels'
-        self.fc1 = torch.nn.Linear(in_features=100, out_features=7)
-        # Fuse 'channel' params with image
-        self.fc2 = torch.nn.Linear(in_features=14, out_features=7)
+        self.flat1 = torch.nn.Flatten(start_dim=0, end_dim=2)
 
-        # Combine all images in the batch.
-        self.flat2 = torch.nn.Flatten(start_dim=0, end_dim=2)
-        # Return
-        self.fc3 = torch.nn.Linear(in_features=70, out_features=7)
+        self.fc1 = torch.nn.Linear(in_features=63, out_features=250)
+        self.fc2 = torch.nn.Linear(in_features=250, out_features=250)
+        self.fc3 = torch.nn.Linear(in_features=250, out_features=250)
+        self.fc4 = torch.nn.Linear(in_features=250, out_features=250)
+        self.fc5 = torch.nn.Linear(in_features=250, out_features=7)
 
-    def forward(self, image, params, channels):
-        img1 = self.conv(image)
-        # print(img1.size())
-        # [10, 1, 61, 61]
-        img2 = self.relu(img1)
-
-        img3 = self.pool(img2)
-        # [10, 1, 30, 30]
-        # print(img3.size())
-
-        img4 = self.conv(img3)
-        # print(img4.size())
-        # [10, 1, 21, 21]
-        img5 = self.relu(img4)
-
-        img6 = self.pool(img5)
-        # [10, 1, 10, 10]
-        # print(img6.size())
-
-        img7 = self.flat1(img6)
-        # [10, 1, 100]
-        # print(img7.size())
-
-        # print()
-        img8 = self.fc1(img7)
-        img8 = self.relu(img8)
-        # [10, 1, 7]
-        # print(f"img8: {img8.size()}")
-
-        all_params = torch.cat((params, channels), 2)
-        # [10, 1, 7]
-        # print(f"all_params: {all_params.size()}")
-
-        fuse_img_n_params = torch.cat((img8, all_params), 2)
-        # [10, 1, 14]
-        # print(fuse_img_n_params.size())
-
-        combined_params = self.fc2(fuse_img_n_params)
-        combined_params = self.relu(combined_params)
-        # [10, 1, 7]
-        # print(combined_params.size())
-
-        combined_imgs = self.flat2(combined_params)
-        # [70]
-        # print(combined_imgs.size())
-
-        out = self.fc3(combined_imgs)
-        # out = self.relu(out)
-
-        # print(out)
+    def forward(self, image, params):
+        x = torch.nn.functional.relu(self.flat1(params))
+        x = torch.nn.functional.relu(self.fc1(x))
+        x = torch.nn.functional.relu(self.fc2(x))
+        x = torch.nn.functional.relu(self.fc3(x))
+        x = torch.nn.functional.relu(self.fc4(x))
+        out = self.fc5(x)
 
         return out
 
@@ -206,16 +146,17 @@ model = Optimise_FWHM()
 # define the loss function
 critereon = MSELoss(reduction="sum")
 # define the optimizer
-optimizer = SGD(model.parameters(), lr=0.00001)
+optimizer = torch.optim.Adam(model.parameters(), lr=1e-8)
 
 # define the number of epochs and the data set size
-epochs = 20000
+epochs = 10000
 data_size = 10
 
 
-# create our training loop
+losses = []
+
 for epoch in range(epochs):
-    # Start with some appropriate parameters
+    # Seed
     x0 = random.uniform(-2, 2)
     y0 = random.uniform(-2, 2)
     sigma_x = random.uniform(8, 12)
@@ -225,17 +166,20 @@ for epoch in range(epochs):
     theta = random.uniform(50, 70)
     data_size = 10
 
-    images_out, params_out, channels_out, truth_out = generate_gaussian2(
+    optimizer.zero_grad()
+
+    images_out, params_out, truth_out = generate_gaussian2(
         x0, y0, sigma_x, sigma_y, A, offset, theta, data_size, debug=False
     )
     image = Variable(Tensor(images_out.copy()))
     params = Variable(Tensor(params_out.copy()))
-    channels = Variable(Tensor(channels_out.copy()))
     epoch_loss = 0
 
     # Pass image and 'channels' into model
     # to get predicted next channel config.
-    y_pred = model(image, params, channels)
+    y_pred = model(image[:-1], params[:-1, :, :])
+
+    # print(y_pred.size())
 
     # Create synthetic image from model to determine preformance.
     image_pred = generate_gaussian2(
@@ -252,22 +196,38 @@ for epoch in range(epochs):
 
     # Check the image predicted by the model
     # against the known good image.
-    image_pred = Variable(Tensor(image_pred.copy()), requires_grad=True)
-    loss = critereon(image_pred[:][0], image[:][0])
+    loss = critereon(y_pred, params[-1, 0, :])
     epoch_loss = loss.data
+
+    loss.backward()
+    optimizer.step()
+
+    losses.append(loss.detach().numpy())
 
     # Visualise
     if epoch % 1000 == 99:
         print(f"Epoch: {epoch} Loss: {epoch_loss}")
-
-    optimizer.zero_grad()
-    loss.backward()
-    optimizer.step()
+        print(f"x0: {y_pred[0]}")
+        print(f"y0: {y_pred[1]}")
+        print(f"sigma_x: {y_pred[2]}")
+        print(f"sigma_y: {y_pred[3]}")
+        print(f"A: {y_pred[4]}")
+        print(f"offset: {y_pred[5]}")
+        print(f"theta: {y_pred[6]}")
+        print()
+        print(params[-1, 0, :])
+        print()
 
 # Now want to test model with unseen data.
 # Generate some new params and give them to the model,
 # compare against the analytic value.
 # Visually display both for easy comparison.
+
+# Display loss
+plt.plot(range(epochs), losses)
+plt.ylabel("Loss")
+plt.xlabel("epoch")
+plt.show()
 
 print("-" * 45)
 
@@ -295,14 +255,13 @@ print(f"FWHM_y (Real) = {2 * np.sqrt(2 * np.log(2)) * sigma_y}")
 print()
 
 model.eval()
-images_out, params_out, channels_out, truth_out = generate_gaussian2(
+images_out, params_out, truth_out = generate_gaussian2(
     x0, y0, sigma_x, sigma_y, A, offset, theta, data_size, debug=True
 )
 
 image = Variable(Tensor(images_out.copy()))
 params = Variable(Tensor(params_out.copy()))
-channels = Variable(Tensor(channels_out.copy()))
-prediction = model(image, params, channels)
+prediction = model(image[:-1], params[:-1, :, :])
 
 predicted_image = generate_gaussian2(
     prediction[0].detach().numpy(),

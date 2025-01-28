@@ -55,8 +55,8 @@ critereon = MSELoss()
 optimizer = SGD(model.parameters(), lr=0.01)
 
 # define the number of epochs and the data set size
-nb_epochs = 20000
-data_size = 1000
+nb_epochs = 5
+data_size = 10
 
 
 # create our training loop
@@ -74,6 +74,7 @@ for epoch in range(nb_epochs):
     optimizer.zero_grad()
     loss.backward()
     optimizer.step()
+
 
 # Grab a single piece of test data and pass through the NN.
 # Compare the result to the forumla to determine model accuracy.
