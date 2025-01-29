@@ -1,0 +1,282 @@
+#######################################################################
+# Toy problem 3 - Gaussian Sequence prediction
+#######################################################################
+
+import os
+import random
+
+import matplotlib.pyplot as plt
+import numpy as np
+import torch
+import torch.share
+from torch import Tensor
+from torch.autograd import Variable
+from torch.nn import MSELoss
+
+os.system("clear")
+
+################################
+# Data Generation
+################################
+
+
+def elliptical_gaussian(x, y, x0, y0, sigma_x, sigma_y, A, offset, theta):
+    a = (np.cos(theta) ** 2) / (2 * sigma_x**2) + (np.sin(theta) ** 2) / (
+        2 * sigma_y**2
+    )
+    b = -(np.sin(2 * theta)) / (4 * sigma_x**2) + (np.sin(2 * theta)) / (4 * sigma_y**2)
+    c = (np.sin(theta) ** 2) / (2 * sigma_x**2) + (np.cos(theta) ** 2) / (
+        2 * sigma_y**2
+    )
+    g = offset + A * np.exp(
+        -(a * ((x - x0) ** 2) + 2 * b * (x - x0) * (y - y0) + c * ((y - y0) ** 2))
+    )
+
+    return g
+
+
+def generate_gaussian2(x0, y0, sigma_x, sigma_y, A, offset, theta, data_size, debug):
+    """Function to fit, returns 2D gaussian function"""
+
+    # Create the grid
+    x, y = np.meshgrid(np.arange(-50, 50, 1), np.arange(-50, 50, 1))
+
+    # Prepare numpy arrays for export
+    images_out = np.empty(shape=(data_size, 1, 100, 100))
+    params_out = np.empty(shape=(data_size, 1, 7))
+
+    # Deviate gaussian
+    for item in range(data_size):
+        # Non-linear, reproducible 'mirror deviation'
+        # Model will learn this equation.
+        if item % 2 == 1:
+            x0 += item / 40 * np.cos(item)
+            y0 -= item / 20
+            A += item * np.cos(item) / 4
+        else:
+            x0 -= item / 20 * np.sin(item)
+            y0 += item / 40
+        if item <= 7 and item % 3 == 0:
+            sigma_x += item / 1.3
+        elif item <= 5 and item % 2 == 0:
+            sigma_y += item
+            A += item * np.cos(item) / 4
+        elif item <= 9 and item % 2 == 1:
+            sigma_y += item / 2
+            A += item * np.sin(item) / 4
+        else:
+            sigma_x += item / 8
+            sigma_y += item / 8
+        if item >= 6:
+            A -= 2.5
+        if sigma_x >= sigma_y:
+            offset += np.sin(item * np.cos(item))
+        else:
+            offset += np.sin(item) / 10
+            theta -= 0.1
+
+        # Export images and variables
+        images_out[item, 0, :, :] = elliptical_gaussian(
+            x, y, x0, y0, sigma_x, sigma_y, A, offset, theta
+        )
+        params_out[item, :, :] = [
+            [x0, y0, sigma_x, sigma_y, A, offset, theta],
+        ]
+
+        # Add some noise
+        images_out[item, 0, :, :] += (
+            np.random.random(np.shape(images_out[item, 0, :, :])) * item / 20
+        )
+
+        if debug:
+            plt.subplot(2, data_size // 2, item + 1)
+            plt.imshow(images_out[item, 0, :, :], cmap="hot", interpolation="nearest")
+    if debug:
+        plt.show()
+
+    # Reverse order of datasets
+    images_out = np.flip(images_out, 0)
+    params_out = np.flip(params_out, 0)
+
+    return images_out, params_out
+
+
+################################
+# Model Setup
+################################
+
+
+class Focusing_Sequence(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.flat1 = torch.nn.Flatten(start_dim=0, end_dim=2)
+        self.fc1 = torch.nn.Linear(in_features=21, out_features=250)
+        self.fc2 = torch.nn.Linear(in_features=250, out_features=250)
+        self.fc3 = torch.nn.Linear(in_features=250, out_features=250)
+        self.fc4 = torch.nn.Linear(in_features=250, out_features=7)
+
+    def forward(self, image, params):
+        x = self.flat1(params)
+        x = self.fc1(x)
+        x = self.fc2(x)
+        x = self.fc3(x)
+        out = self.fc4(x)
+        return out
+
+
+model = Focusing_Sequence()
+
+# Define loss, optimiser and run parameters.
+critereon = MSELoss()
+optimizer = torch.optim.AdamW(model.parameters(), lr=1e-4)
+
+epochs = 1000
+data_size = 10
+
+losses = []
+
+
+################################
+# Training
+################################
+
+for epoch in range(epochs):
+    # Seed for focusing sequence
+    x0 = random.uniform(-2, 2)
+    y0 = random.uniform(-2, 2)
+    sigma_x = random.uniform(8, 12)
+    sigma_y = sigma_x
+    A = random.uniform(17, 19)
+    offset = random.uniform(-3, 3)
+    theta = random.uniform(50, 70)
+    data_size = 10
+
+    optimizer.zero_grad()
+
+    # Generate focusing sequence
+    images_out, params_out = generate_gaussian2(
+        x0, y0, sigma_x, sigma_y, A, offset, theta, data_size, debug=False
+    )
+
+    slice = random.randrange(0, 7)
+    next_images_out = images_out[slice + 3, 0, :, :]
+    next_params_out = params_out[slice + 3, 0, :]
+    images_out = images_out[slice : slice + 3, :, :, :]
+    params_out = params_out[slice : slice + 3, :, :]
+
+    # Pass sequence through the model
+    image = Variable(Tensor(images_out.copy()))
+    params = Variable(Tensor(params_out.copy()))
+    next_images_out = Variable(Tensor(next_images_out.copy()))
+    next_params_out = Variable(Tensor(next_params_out.copy()))
+    epoch_loss = 0
+
+    model_pred = model(image, params)
+
+    # Calculate loss, backpropagate etc
+    loss = critereon(model_pred, next_params_out)
+
+    loss.backward()
+    optimizer.step()
+    epoch_loss = loss.data
+
+    losses.append(loss.detach().numpy())
+
+    if epoch % 1000 == 99:
+        print(f"Epoch: {epoch} Loss: {epoch_loss}")
+
+
+################################
+# Testing
+################################
+
+model.eval()
+
+# Display loss
+# plt.plot(range(epochs), losses)
+# plt.ylabel("Loss")
+# plt.xlabel("epoch")
+# plt.show()
+
+# Testing sequence seed
+x0 = random.uniform(-2, 2)
+y0 = random.uniform(-2, 2)
+sigma_x = random.uniform(8, 12)
+sigma_y = sigma_x
+A = random.uniform(17, 19)
+offset = random.uniform(-3, 3)
+theta = random.uniform(50, 70)
+data_size = 10
+
+# Generate focusing sequence
+images_out, params_out = generate_gaussian2(
+    x0, y0, sigma_x, sigma_y, A, offset, theta, data_size, debug=True
+)
+
+# Pass testing sequence through the model
+slice = random.randrange(0, 7)
+next_images_out = images_out[slice + 3, 0, :, :]
+next_params_out = params_out[slice + 3, 0, :]
+images_out = images_out[slice : slice + 3, :, :, :]
+params_out = params_out[slice : slice + 3, :, :]
+
+image = Variable(Tensor(images_out.copy()))
+params = Variable(Tensor(params_out.copy()))
+
+prediction = model(image, params)
+prediction_org = prediction.detach().clone()
+
+predicted_image = generate_gaussian2(
+    prediction[0].detach().numpy(),
+    prediction[1].detach().numpy(),
+    prediction[2].detach().numpy(),
+    prediction[3].detach().numpy(),
+    prediction[4].detach().numpy(),
+    prediction[5].detach().numpy(),
+    prediction[6].detach().numpy(),
+    data_size,
+    debug=False,
+)[0]
+
+print("=" * 50)
+print("         TEST PARAMS vs MODEL PARAMS")
+print(f"x0:      {next_params_out[0]} vs {prediction_org[0]}")
+print(f"y0:      {next_params_out[1]} vs {prediction_org[1]}")
+print(f"sigma_x: {next_params_out[2]} vs {prediction_org[2]}")
+print(f"sigma_y: {next_params_out[3]} vs {prediction_org[3]}")
+print(f"A:       {next_params_out[4]} vs {prediction_org[4]}")
+print(f"offset:  {next_params_out[5]} vs {prediction_org[5]}")
+print(f"theta:   {next_params_out[6]} vs {prediction_org[6]}")
+print(f"slice:   {slice + 3}")
+print("=" * 50)
+
+plt.subplot(1, 3, 1)
+plt.imshow(
+    next_images_out,
+    cmap="hot",
+    interpolation="nearest",
+    vmin=np.min(next_images_out),
+    vmax=np.max(next_images_out),
+)
+plt.title("Expected")
+
+plt.subplot(1, 3, 2)
+plt.imshow(
+    predicted_image[-1, 0, :, :],
+    cmap="hot",
+    interpolation="nearest",
+    vmin=np.min(next_images_out),
+    vmax=np.max(next_images_out),
+)
+plt.title("Model")
+
+plt.subplot(1, 3, 3)
+plt.imshow(
+    next_images_out - predicted_image[-1, 0, :, :],
+    cmap="hot",
+    interpolation="nearest",
+    vmin=np.min(next_images_out),
+    vmax=np.max(next_images_out),
+)
+plt.title("Diff")
+plt.show()
