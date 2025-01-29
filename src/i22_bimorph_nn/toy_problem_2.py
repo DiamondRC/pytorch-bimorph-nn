@@ -130,12 +130,10 @@ class Optimise_FWHM(torch.nn.Module):
         self.fc4 = torch.nn.Linear(in_features=250, out_features=250)
         self.fc5 = torch.nn.Linear(in_features=250, out_features=7)
 
-    def forward(self, image, params):
+    def forward(self, params):
         x = torch.nn.functional.relu(self.flat1(params))
         x = torch.nn.functional.relu(self.fc1(x))
         x = torch.nn.functional.relu(self.fc2(x))
-        x = torch.nn.functional.relu(self.fc3(x))
-        x = torch.nn.functional.relu(self.fc4(x))
         out = self.fc5(x)
 
         return out
@@ -144,14 +142,14 @@ class Optimise_FWHM(torch.nn.Module):
 model = Optimise_FWHM()
 
 # define the loss function
-critereon = MSELoss(reduction="sum")
+# critereon = MSELoss(reduction="sum")
+critereon = MSELoss()
 # define the optimizer
-optimizer = torch.optim.Adam(model.parameters(), lr=1e-8)
+optimizer = torch.optim.AdamW(model.parameters(), lr=1e-4)
 
 # define the number of epochs and the data set size
-epochs = 10000
+epochs = 20000
 data_size = 10
-
 
 losses = []
 
@@ -171,28 +169,14 @@ for epoch in range(epochs):
     images_out, params_out, truth_out = generate_gaussian2(
         x0, y0, sigma_x, sigma_y, A, offset, theta, data_size, debug=False
     )
+
     image = Variable(Tensor(images_out.copy()))
     params = Variable(Tensor(params_out.copy()))
     epoch_loss = 0
 
     # Pass image and 'channels' into model
     # to get predicted next channel config.
-    y_pred = model(image[:-1], params[:-1, :, :])
-
-    # print(y_pred.size())
-
-    # Create synthetic image from model to determine preformance.
-    image_pred = generate_gaussian2(
-        x0=y_pred[0].detach().numpy(),
-        y0=y_pred[1].detach().numpy(),
-        sigma_x=y_pred[2].detach().numpy(),
-        sigma_y=y_pred[3].detach().numpy(),
-        A=y_pred[4].detach().numpy(),
-        offset=y_pred[5].detach().numpy(),
-        theta=y_pred[6].detach().numpy(),
-        data_size=1,
-        debug=False,
-    )[0]
+    y_pred = model(params[:-1, :, :])
 
     # Check the image predicted by the model
     # against the known good image.
@@ -206,30 +190,40 @@ for epoch in range(epochs):
 
     # Visualise
     if epoch % 1000 == 99:
-        print(f"Epoch: {epoch} Loss: {epoch_loss}")
-        print(f"x0: {y_pred[0]}")
-        print(f"y0: {y_pred[1]}")
-        print(f"sigma_x: {y_pred[2]}")
-        print(f"sigma_y: {y_pred[3]}")
-        print(f"A: {y_pred[4]}")
-        print(f"offset: {y_pred[5]}")
-        print(f"theta: {y_pred[6]}")
+        print(f"Epoch:   {epoch} Loss: {epoch_loss}")
+        print(f"x0:      {y_pred[0]} vs {params[-1, :, :][0][0]}")
+        print(f"y0:      {y_pred[1]} vs {params[-1, :, :][0][1]}")
+        print(f"sigma_x: {y_pred[2]} vs {params[-1, :, :][0][2]}")
+        print(f"sigma_y: {y_pred[3]} vs {params[-1, :, :][0][3]}")
+        print(f"A:       {y_pred[4]} vs {params[-1, :, :][0][4]}")
+        print(f"offset:  {y_pred[5]} vs {params[-1, :, :][0][5]}")
+        print(f"theta:   {y_pred[6]} vs {params[-1, :, :][0][6]}")
         print()
-        print(params[-1, 0, :])
-        print()
+
+        # predicted_image = generate_gaussian2(
+        # y_pred[0].detach().numpy(),
+        # y_pred[1].detach().numpy(),
+        # y_pred[2].detach().numpy(),
+        # y_pred[3].detach().numpy(),
+        # y_pred[4].detach().numpy(),
+        # y_pred[5].detach().numpy(),
+        # y_pred[6].detach().numpy(),
+        # data_size,
+        # debug=False,
+        # )
+
+        # plt.imshow(
+        # predicted_image[0][-1, 0, :, :],
+        # cmap="hot",
+        # interpolation="nearest",
+        # )
+        # plt.title("Model")
+        # plt.show()
 
 # Now want to test model with unseen data.
 # Generate some new params and give them to the model,
 # compare against the analytic value.
 # Visually display both for easy comparison.
-
-# Display loss
-plt.plot(range(epochs), losses)
-plt.ylabel("Loss")
-plt.xlabel("epoch")
-plt.show()
-
-print("-" * 45)
 
 x0 = random.uniform(-2, 2)
 y0 = random.uniform(-2, 2)
@@ -240,28 +234,14 @@ offset = random.uniform(-3, 3)
 theta = random.uniform(50, 70)
 data_size = 10
 
-print()
-print("=" * 45)
-print("TEST PARAMS:")
-print(f"x0 = {x0}")
-print(f"y0 = {y0}")
-print(f"sigma_x = {sigma_x}")
-print(f"sigma_y = {sigma_y}")
-print(f"A = {A}")
-print(f"offset = {offset}")
-print(f"theta = {theta}")
-print(f"FWHM_x (Real) = {2 * np.sqrt(2 * np.log(2)) * sigma_x}")
-print(f"FWHM_y (Real) = {2 * np.sqrt(2 * np.log(2)) * sigma_y}")
-print()
-
 model.eval()
 images_out, params_out, truth_out = generate_gaussian2(
-    x0, y0, sigma_x, sigma_y, A, offset, theta, data_size, debug=True
+    x0, y0, sigma_x, sigma_y, A, offset, theta, data_size, debug=False
 )
 
 image = Variable(Tensor(images_out.copy()))
 params = Variable(Tensor(params_out.copy()))
-prediction = model(image[:-1], params[:-1, :, :])
+prediction = model(params[:-1, :, :])
 
 predicted_image = generate_gaussian2(
     prediction[0].detach().numpy(),
@@ -275,19 +255,16 @@ predicted_image = generate_gaussian2(
     debug=False,
 )
 
-
-print("MODEL PARAMS:")
-print(f"x0 = {prediction[0]}")
-print(f"y0 = {prediction[1]}")
-print(f"sigma_x = {prediction[2]}")
-print(f"sigma_y = {prediction[3]}")
-print(f"A = {prediction[4]}")
-print(f"offset = {prediction[5]}")
-print(f"theta = {prediction[6]}")
-print(f"FWHM_x (Model) = {2 * np.sqrt(2 * np.log(2)) * prediction[2]}")
-print(f"FWHM_y (Model) = {2 * np.sqrt(2 * np.log(2)) * prediction[3]}")
 print("=" * 45)
-print()
+print("TEST PARAMS vs MODEL PARAMS")
+print(f"x0:      {x0} vs {prediction[0]}")
+print(f"y0:      {y0} vs {prediction[1]}")
+print(f"sigma_x: {sigma_x} vs {prediction[2]}")
+print(f"sigma_y: {sigma_y} vs {prediction[3]}")
+print(f"A:       {A} vs {prediction[4]}")
+print(f"offset:  {offset} vs {prediction[5]}")
+print(f"theta:   {theta} vs {prediction[6]}")
+print("=" * 45)
 
 plt.subplot(1, 3, 1)
 plt.imshow(
@@ -301,7 +278,7 @@ plt.title("Expected")
 
 plt.subplot(1, 3, 2)
 plt.imshow(
-    predicted_image[0][0, 0, :, :],
+    predicted_image[0][-1, 0, :, :],
     cmap="hot",
     interpolation="nearest",
     vmin=np.min(images_out[-1][0]),
@@ -311,12 +288,20 @@ plt.title("Model")
 
 plt.subplot(1, 3, 3)
 plt.imshow(
-    images_out[-1][0] - predicted_image[0][0, 0, :, :],
+    images_out[-1][0] - predicted_image[0][-1, 0, :, :],
     cmap="hot",
     interpolation="nearest",
     vmin=np.min(images_out[-1][0]),
     vmax=np.max(images_out[-1][0]),
 )
 plt.title("Diff")
+
+plt.show()
+
+# Display loss
+
+plt.plot(range(epochs), losses)
+plt.ylabel("Loss")
+plt.xlabel("epoch")
 
 plt.show()
