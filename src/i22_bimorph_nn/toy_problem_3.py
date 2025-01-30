@@ -207,8 +207,7 @@ A = random.uniform(17, 19)
 offset = random.uniform(-3, 3)
 theta = random.uniform(50, 70)
 data_size = 10
-# slice = random.randrange(0, 7)
-slice = 0
+slice = random.randrange(0, 6)
 
 # Generate focusing sequence
 images_out, params_out = generate_gaussian2(
@@ -224,17 +223,13 @@ images_out = images_out[slice : slice + 3, :, :, :]
 params_out = params_out[slice : slice + 3, :, :]
 
 image = Variable(Tensor(images_out.copy()))
-params = Variable(Tensor(params_out.copy()))
+prev_params = params_out
+params = Variable(Tensor(prev_params.copy()))
 
 # Recursively pass images back into the model
-
-prev_params = params_out[slice : slice + 3, :, :]
 model_sequence = []
-print(np.shape(prev_params))
 for _ in range(len(images_out_org) - slice):
-    print(f"len(images_out)-slice: {len(images_out_org) - slice}")
-    print(f"slice: {slice}")
-    prediction = model(image, prev_params)
+    prediction = model(image, params)
     prediction_org = prediction.detach().clone()
 
     predicted_image = generate_gaussian2(
@@ -263,10 +258,15 @@ for _ in range(len(images_out_org) - slice):
     print("=" * 50)
 
     # Ensure you've got exactly three images to pass into the model
-    prev_params.append(prediction_org)
+    params = params.detach().numpy()
+    prediction_org = prediction_org.detach().numpy()
+    tmp_for_append = np.empty(shape=(1, 1, 7))
+    tmp_for_append[0, 0, :] = prediction_org
+    params = np.concatenate((params, tmp_for_append), axis=0)
     model_sequence.append(predicted_image)
-    if len(prev_params) > 3:
-        prev_params.pop(0)
+
+    params = np.delete(params, 0, 0)
+    params = Variable(Tensor(params.copy()))
 
 
 for i in range(1, len(model_sequence)):
@@ -285,40 +285,9 @@ for i in range(1, len(model_sequence)):
             images_out_org[(j - 1) + slice, 0, :, :],
             cmap="hot",
             interpolation="nearest",
-            # vmin=np.min(images_out),
-            # vmax=np.max(images_out),
+            vmin=np.min(images_out_org[(j - 1) + slice]),
+            vmax=np.max(images_out_org[(j - 1) + slice]),
         )
         plt.title("Expected Out")
 
 plt.show()
-
-# plt.subplot(1, 3, 1)
-# plt.imshow(
-#     next_images_out,
-#     cmap="hot",
-#     interpolation="nearest",
-#     vmin=np.min(next_images_out),
-#     vmax=np.max(next_images_out),
-# )
-# plt.title("Expected")
-
-# plt.subplot(1, 3, 2)
-# plt.imshow(
-#     predicted_image[-1, 0, :, :],
-#     cmap="hot",
-#     interpolation="nearest",
-#     vmin=np.min(next_images_out),
-#     vmax=np.max(next_images_out),
-# )
-# plt.title("Model")
-
-# plt.subplot(1, 3, 3)
-# plt.imshow(
-#     next_images_out - predicted_image[-1, 0, :, :],
-#     cmap="hot",
-#     interpolation="nearest",
-#     vmin=np.min(next_images_out),
-#     vmax=np.max(next_images_out),
-# )
-# plt.title("Diff")
-# plt.show()
