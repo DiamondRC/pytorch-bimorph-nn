@@ -207,76 +207,118 @@ A = random.uniform(17, 19)
 offset = random.uniform(-3, 3)
 theta = random.uniform(50, 70)
 data_size = 10
+# slice = random.randrange(0, 7)
+slice = 0
 
 # Generate focusing sequence
 images_out, params_out = generate_gaussian2(
-    x0, y0, sigma_x, sigma_y, A, offset, theta, data_size, debug=True
+    x0, y0, sigma_x, sigma_y, A, offset, theta, data_size, debug=False
 )
 
 # Pass testing sequence through the model
-slice = random.randrange(0, 7)
 next_images_out = images_out[slice + 3, 0, :, :]
 next_params_out = params_out[slice + 3, 0, :]
+images_out_org = images_out
+params_out_org = params_out
 images_out = images_out[slice : slice + 3, :, :, :]
 params_out = params_out[slice : slice + 3, :, :]
 
 image = Variable(Tensor(images_out.copy()))
 params = Variable(Tensor(params_out.copy()))
 
-prediction = model(image, params)
-prediction_org = prediction.detach().clone()
+# Recursively pass images back into the model
 
-predicted_image = generate_gaussian2(
-    prediction[0].detach().numpy(),
-    prediction[1].detach().numpy(),
-    prediction[2].detach().numpy(),
-    prediction[3].detach().numpy(),
-    prediction[4].detach().numpy(),
-    prediction[5].detach().numpy(),
-    prediction[6].detach().numpy(),
-    data_size,
-    debug=False,
-)[0]
+prev_params = params_out[slice : slice + 3, :, :]
+model_sequence = []
+print(np.shape(prev_params))
+for _ in range(len(images_out_org) - slice):
+    print(f"len(images_out)-slice: {len(images_out_org) - slice}")
+    print(f"slice: {slice}")
+    prediction = model(image, prev_params)
+    prediction_org = prediction.detach().clone()
 
-print("=" * 50)
-print("         TEST PARAMS vs MODEL PARAMS")
-print(f"x0:      {next_params_out[0]} vs {prediction_org[0]}")
-print(f"y0:      {next_params_out[1]} vs {prediction_org[1]}")
-print(f"sigma_x: {next_params_out[2]} vs {prediction_org[2]}")
-print(f"sigma_y: {next_params_out[3]} vs {prediction_org[3]}")
-print(f"A:       {next_params_out[4]} vs {prediction_org[4]}")
-print(f"offset:  {next_params_out[5]} vs {prediction_org[5]}")
-print(f"theta:   {next_params_out[6]} vs {prediction_org[6]}")
-print(f"slice:   {slice + 3}")
-print("=" * 50)
+    predicted_image = generate_gaussian2(
+        prediction[0].detach().numpy(),
+        prediction[1].detach().numpy(),
+        prediction[2].detach().numpy(),
+        prediction[3].detach().numpy(),
+        prediction[4].detach().numpy(),
+        prediction[5].detach().numpy(),
+        prediction[6].detach().numpy(),
+        data_size,
+        debug=False,
+    )[0][-1, 0, :, :]
 
-plt.subplot(1, 3, 1)
-plt.imshow(
-    next_images_out,
-    cmap="hot",
-    interpolation="nearest",
-    vmin=np.min(next_images_out),
-    vmax=np.max(next_images_out),
-)
-plt.title("Expected")
+    print()
+    print("=" * 50)
+    print("         TEST PARAMS vs MODEL PARAMS")
+    print(f"x0:      {next_params_out[0]} vs {prediction_org[0]}")
+    print(f"y0:      {next_params_out[1]} vs {prediction_org[1]}")
+    print(f"sigma_x: {next_params_out[2]} vs {prediction_org[2]}")
+    print(f"sigma_y: {next_params_out[3]} vs {prediction_org[3]}")
+    print(f"A:       {next_params_out[4]} vs {prediction_org[4]}")
+    print(f"offset:  {next_params_out[5]} vs {prediction_org[5]}")
+    print(f"theta:   {next_params_out[6]} vs {prediction_org[6]}")
+    print(f"slice:   {slice + 3}")
+    print("=" * 50)
 
-plt.subplot(1, 3, 2)
-plt.imshow(
-    predicted_image[-1, 0, :, :],
-    cmap="hot",
-    interpolation="nearest",
-    vmin=np.min(next_images_out),
-    vmax=np.max(next_images_out),
-)
-plt.title("Model")
+    # Ensure you've got exactly three images to pass into the model
+    prev_params.append(prediction_org)
+    model_sequence.append(predicted_image)
+    if len(prev_params) > 3:
+        prev_params.pop(0)
 
-plt.subplot(1, 3, 3)
-plt.imshow(
-    next_images_out - predicted_image[-1, 0, :, :],
-    cmap="hot",
-    interpolation="nearest",
-    vmin=np.min(next_images_out),
-    vmax=np.max(next_images_out),
-)
-plt.title("Diff")
+
+for i in range(1, len(model_sequence)):
+    plt.subplot(2, len(model_sequence), i)
+    plt.imshow(
+        model_sequence[i - 1],
+        cmap="hot",
+        interpolation="nearest",
+        # vmin=np.min(images_out),
+        # vmax=np.max(images_out),
+    )
+    plt.title("Model Out")
+    for j in range(1, len(model_sequence)):
+        plt.subplot(2, len(model_sequence), len(model_sequence) + j)
+        plt.imshow(
+            images_out_org[(j - 1) + slice, 0, :, :],
+            cmap="hot",
+            interpolation="nearest",
+            # vmin=np.min(images_out),
+            # vmax=np.max(images_out),
+        )
+        plt.title("Expected Out")
+
 plt.show()
+
+# plt.subplot(1, 3, 1)
+# plt.imshow(
+#     next_images_out,
+#     cmap="hot",
+#     interpolation="nearest",
+#     vmin=np.min(next_images_out),
+#     vmax=np.max(next_images_out),
+# )
+# plt.title("Expected")
+
+# plt.subplot(1, 3, 2)
+# plt.imshow(
+#     predicted_image[-1, 0, :, :],
+#     cmap="hot",
+#     interpolation="nearest",
+#     vmin=np.min(next_images_out),
+#     vmax=np.max(next_images_out),
+# )
+# plt.title("Model")
+
+# plt.subplot(1, 3, 3)
+# plt.imshow(
+#     next_images_out - predicted_image[-1, 0, :, :],
+#     cmap="hot",
+#     interpolation="nearest",
+#     vmin=np.min(next_images_out),
+#     vmax=np.max(next_images_out),
+# )
+# plt.title("Diff")
+# plt.show()
