@@ -130,7 +130,7 @@ model = Focusing_Sequence()
 critereon = MSELoss()
 optimizer = torch.optim.AdamW(model.parameters(), lr=1e-4)
 
-epochs = 1000
+epochs = 5000
 data_size = 10
 
 losses = []
@@ -193,10 +193,10 @@ for epoch in range(epochs):
 model.eval()
 
 # Display loss
-# plt.plot(range(epochs), losses)
-# plt.ylabel("Loss")
-# plt.xlabel("epoch")
-# plt.show()
+plt.plot(range(epochs), losses)
+plt.ylabel("Loss")
+plt.xlabel("epoch")
+plt.show()
 
 # Testing sequence seed
 x0 = random.uniform(-2, 2)
@@ -228,7 +228,7 @@ params = Variable(Tensor(prev_params.copy()))
 
 # Recursively pass images back into the model
 model_sequence = []
-for _ in range(len(images_out_org) - slice):
+for item in range(len(images_out_org) - slice):
     prediction = model(image, params)
     prediction_org = prediction.detach().clone()
 
@@ -247,14 +247,14 @@ for _ in range(len(images_out_org) - slice):
     print()
     print("=" * 50)
     print("         TEST PARAMS vs MODEL PARAMS")
-    print(f"x0:      {next_params_out[0]} vs {prediction_org[0]}")
-    print(f"y0:      {next_params_out[1]} vs {prediction_org[1]}")
-    print(f"sigma_x: {next_params_out[2]} vs {prediction_org[2]}")
-    print(f"sigma_y: {next_params_out[3]} vs {prediction_org[3]}")
-    print(f"A:       {next_params_out[4]} vs {prediction_org[4]}")
-    print(f"offset:  {next_params_out[5]} vs {prediction_org[5]}")
-    print(f"theta:   {next_params_out[6]} vs {prediction_org[6]}")
-    print(f"slice:   {slice + 3}")
+    print(f"Sequence no: {item + slice}")
+    print(f"x0:      {params_out_org[item + slice, 0, 0]} vs {prediction_org[0]}")
+    print(f"y0:      {params_out_org[item + slice, 0, 1]} vs {prediction_org[1]}")
+    print(f"sigma_x: {params_out_org[item + slice, 0, 2]} vs {prediction_org[2]}")
+    print(f"sigma_y: {params_out_org[item + slice, 0, 3]} vs {prediction_org[3]}")
+    print(f"A:       {params_out_org[item + slice, 0, 4]} vs {prediction_org[4]}")
+    print(f"offset:  {params_out_org[item + slice, 0, 5]} vs {prediction_org[5]}")
+    print(f"theta:   {params_out_org[item + slice, 0, 6]} vs {prediction_org[6]}")
     print("=" * 50)
 
     # Ensure you've got exactly three images to pass into the model
@@ -270,17 +270,17 @@ for _ in range(len(images_out_org) - slice):
 
 
 for i in range(1, len(model_sequence)):
-    plt.subplot(2, len(model_sequence), i)
+    plt.subplot(3, len(model_sequence), i)
     plt.imshow(
         model_sequence[i - 1],
         cmap="hot",
         interpolation="nearest",
-        # vmin=np.min(images_out),
-        # vmax=np.max(images_out),
+        vmin=np.min(images_out_org[(i - 1) + slice]),
+        vmax=np.max(images_out_org[(i - 1) + slice]),
     )
     plt.title("Model Out")
     for j in range(1, len(model_sequence)):
-        plt.subplot(2, len(model_sequence), len(model_sequence) + j)
+        plt.subplot(3, len(model_sequence), len(model_sequence) + j)
         plt.imshow(
             images_out_org[(j - 1) + slice, 0, :, :],
             cmap="hot",
@@ -289,5 +289,15 @@ for i in range(1, len(model_sequence)):
             vmax=np.max(images_out_org[(j - 1) + slice]),
         )
         plt.title("Expected Out")
+        for k in range(1, len(model_sequence)):
+            plt.subplot(3, len(model_sequence), 2 * len(model_sequence) + k)
+            plt.imshow(
+                images_out_org[(k - 1) + slice, 0, :, :] - model_sequence[k - 1],
+                cmap="hot",
+                interpolation="nearest",
+                vmin=np.min(images_out_org[(k - 1) + slice]),
+                vmax=np.max(images_out_org[(k - 1) + slice]),
+            )
+            plt.title("Diff")
 
 plt.show()
