@@ -34,31 +34,25 @@ def get_data_from_run(dir, file, detector):
     with h5py.File(f"{dir}{file}.nxs", "r") as f:
         volt_out = np.empty(shape=(data_set_size, vfm_channels + hfm_channels))
         for item in range(1, vfm_channels + 1):
-            volt_out[:, item - 1] = f["entry"]["instrument"]["bimorph_vfm"][
-                f"channels-{item}-output_voltage"
+            volt_out[:, item - 1] = f[
+                f"entry/instrument/bimorph_vfm/channels-{item}-output_voltage"
             ]
         for item in range(1, hfm_channels + 1):
-            volt_out[:, vfm_channels + item - 1] = f["entry"]["instrument"][
-                "bimorph_hfm"
-            ][f"channels-{item}-output_voltage"]
+            volt_out[:, vfm_channels + item - 1] = f[
+                f"entry/instrument/bimorph_hfm/channels-{item}-output_voltage"
+            ]
 
     with h5py.File(f"{dir}{file}{detector}.h5", "r") as f:
         image_out = np.empty(shape=(data_set_size, 1, *detector_res))
         params_out = np.empty(shape=(data_set_size, 6))
 
-        image_out[:, 0, :, :] = f["entry"]["data"]["data"]
-        params_out[:, 0] = f["entry"]["instrument"]["NDAttributes"][
-            "StatsCentroidSigmaX"
-        ]
-        params_out[:, 1] = f["entry"]["instrument"]["NDAttributes"][
-            "StatsCentroidSigmaY"
-        ]
-        params_out[:, 2] = f["entry"]["instrument"]["NDAttributes"][
-            "StatsCentroidSigmaXY"
-        ]
-        params_out[:, 3] = f["entry"]["instrument"]["NDAttributes"]["StatsCentroidX"]
-        params_out[:, 4] = f["entry"]["instrument"]["NDAttributes"]["StatsCentroidY"]
-        params_out[:, 5] = f["entry"]["instrument"]["NDAttributes"]["StatsSigma"]
+        image_out[:, 0, :, :] = f["entry/data/data"]
+        params_out[:, 0] = f["entry/instrument/NDAttributes/StatsCentroidSigmaX"]
+        params_out[:, 1] = f["entry/instrument/NDAttributes/StatsCentroidSigmaY"]
+        params_out[:, 2] = f["entry/instrument/NDAttributes/StatsCentroidSigmaXY"]
+        params_out[:, 3] = f["entry/instrument/NDAttributes/StatsCentroidX"]
+        params_out[:, 4] = f["entry/instrument/NDAttributes/StatsCentroidY"]
+        params_out[:, 5] = f["entry/instrument/NDAttributes/StatsSigma"]
     return (volt_out.T, image_out, params_out.T)
 
 
@@ -145,26 +139,17 @@ for file in os.listdir(dir):
                     file_hash = hash(f)
                     # 4/5ths of the dataset for testing
                     if file_hash % 5 != 0:
-                        print(
-                            f"Training set: {file_path.name}, \
-Length: {f['entry/instrument/beam_device/beam_intensity'][0]}"
-                        )
+                        print(f"Training set: {file_path.name}")
                         print(f"Training set: {file_path.name[:-4]}-ss.hf5")
                         # get_data_from_run(dir, file_path.name[:-4], detector)
                     # 10% for val
                     elif file_hash % 2 != 0:
-                        print(
-                            f"Validation set: {file_path.name}, \
-Length: {f['entry/instrument/beam_device/beam_intensity']}"
-                        )
+                        print(f"Validation set: {file_path.name}")
                         print(f"Validation set: {file_path.name[:-4]}-ss.hf5")
                         # get_data_from_run(dir, file_path.name[:-4], detector)
                     # 10% for tst
                     else:
-                        print(
-                            f"Test set: {file_path.name}, \
-Length: {f['entry/instrument/beam_device/beam_intensity']}"
-                        )
+                        print(f"Test set: {file_path.name}")
                         print(f"Test set: {file_path.name[:-4]}-ss.hf5")
                         # get_data_from_run(dir, file_path.name[:-4], detector)
             except KeyError:
