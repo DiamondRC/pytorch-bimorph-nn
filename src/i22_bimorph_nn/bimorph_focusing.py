@@ -3,6 +3,7 @@
 #######################################################################
 
 import os
+import random
 from pathlib import Path
 
 import h5py
@@ -18,13 +19,12 @@ os.system("clear")
 # Data Loading
 ################################
 
-
 hfm_channels = 12
 vfm_channels = 32
 data_set_size = 15
+images_per_sequence = 3
 detector = "-ss"
 detector_res = (2464, 2056)
-# dir = "/scratch/fye77278/bimorph_tmp_data/"
 dir = "/dls/i22/data/2025/nr40718-1/"
 file = "i22-803415"
 
@@ -53,7 +53,7 @@ def get_data_from_run(dir, file, detector):
         params_out[:, 3] = f["entry/instrument/NDAttributes/StatsCentroidX"]
         params_out[:, 4] = f["entry/instrument/NDAttributes/StatsCentroidY"]
         params_out[:, 5] = f["entry/instrument/NDAttributes/StatsSigma"]
-    return (volt_out.T, image_out, params_out.T)
+    return (volt_out, image_out, params_out.T)
 
 
 ################################
@@ -64,28 +64,74 @@ def get_data_from_run(dir, file, detector):
 class Bimorph_Focusing(torch.nn.Module):
     def __init__(self):
         super().__init__()
-        self.flat1 = torch.nn.Flatten(start_dim=0, end_dim=2)
-        self.fc1 = torch.nn.Linear(in_features=21, out_features=250)
-        self.fc2 = torch.nn.Linear(in_features=250, out_features=250)
-        self.fc3 = torch.nn.Linear(in_features=250, out_features=250)
-        self.fc4 = torch.nn.Linear(in_features=250, out_features=7)
 
-        self.relu = torch.nn.ReLU()
-
-        # in_channels = C_in, e.g. 1 for greyscale
-        self.conv = torch.nn.Conv2d(
-            in_channels=1, out_channels=1, kernel_size=(8, 8), stride=1
+        self.image_conv = torch.nn.Sequential(
+            torch.nn.Conv2d(
+                in_channels=1, out_channels=32, kernel_size=(9, 9), stride=1
+            ),
+            torch.nn.ReLU(),
+            torch.nn.MaxPool2d(kernel_size=(2, 2), stride=(2, 2)),
+            torch.nn.Conv2d(
+                in_channels=32, out_channels=64, kernel_size=(7, 7), stride=1
+            ),
+            torch.nn.ReLU(),
+            torch.nn.MaxPool2d(kernel_size=(2, 2), stride=(2, 2)),
+            torch.nn.Conv2d(
+                in_channels=64, out_channels=128, kernel_size=(5, 5), stride=1
+            ),
+            torch.nn.ReLU(),
+            torch.nn.MaxPool2d(kernel_size=(2, 2), stride=(2, 2)),
+            torch.nn.Conv2d(
+                in_channels=128, out_channels=128, kernel_size=(3, 3), stride=1
+            ),
+            torch.nn.ReLU(),
+            torch.nn.MaxPool2d(kernel_size=(2, 2), stride=(2, 2)),
         )
-        # 2x2 w/ stride 2 halves each dim, 6x6 -> 3x3 etc.
-        self.pool = torch.nn.MaxPool2d(kernel_size=(2, 2), stride=(2, 2))
 
-    def forward(self, image, params):
-        x = self.flat1(params)
-        x = self.fc1(x)
-        x = self.fc2(x)
-        x = self.fc3(x)
-        out = self.fc4(x)
-        return out
+        self.volt_linear = torch.nn.Sequential(
+            torch.nn.Linear(in_features=44, out_features=200),
+            torch.nn.ReLU(),
+            torch.nn.Linear(in_features=200, out_features=128),
+            torch.nn.ReLU(),
+        )
+
+        self.combine = torch.nn.Sequential(
+            torch.nn.Linear(in_features=2400128, out_features=128),
+            torch.nn.ReLU(),
+            torch.nn.Linear(in_features=128, out_features=1),
+        )
+
+        # Want to encode temporal information of the sequence to give 'next step'
+        # self.sequence = torch.nn.LSTM(
+        #     input_size=
+        #     hidden_size=hidden_size,
+        #     num_layers=
+        #     batch_first=
+        # )
+
+        # Fully connected layer for final prediction
+        # self.fc = torch.nn.Linear(hidden_size, next_numbers)
+
+        # # Normalises data for faster convergence
+        # self.batch1 = torch.nn.BatchNorm2d(num_features=32)
+        # self.batch2 = torch.nn.BatchNorm2d(num_features=64)
+        # self.batch3 = torch.nn.BatchNorm2d(num_features=128)
+        # self.batch4 = torch.nn.BatchNorm2d(num_features=128)
+
+        # # Improve model flexability and bias
+        # self.dropout = torch.nn.Dropout2d(p=0.15)
+
+    def forward(self, image_crop, voltages):
+        batch_size, sequence_length = image_crop.shape[:2]
+        print(batch_size)
+        print(sequence_length)
+
+        # Process images at each timestep
+        # image_features = []
+        # for t in range(sequence_length):
+        #     ...
+
+        # return out
 
 
 model = Bimorph_Focusing()
@@ -102,61 +148,74 @@ losses = []
 # Training
 ################################
 
-epochs = 20
-for epoch in range(epochs):
-    optimizer.zero_grad()
-
-    # Pass sequence through the model
-    image = Variable(Tensor())
-    params = Variable(Tensor())
-    epoch_loss = 0
-
-    model_pred = model(image, params)
-
-    # Calculate loss, backpropagate etc
-    loss = critereon(image)
-
-    loss.backward()
-    optimizer.step()
-    epoch_loss = loss.data
-
-    losses.append(loss.detach().numpy())
-
-    if epoch % 1000 == 99:
-        print(f"Epoch: {epoch} Loss: {epoch_loss}")
 
 count = 0
+epoch = 0
 for file in os.listdir(dir):
+    epoch += 1
     if file.endswith(".nxs"):
         with h5py.File(f"{dir}{file}", "r") as f:
             try:
                 if np.shape(f["entry/instrument/beam_device/beam_intensity"]) == (
                     data_set_size,
                 ):
-                    count += 1
                     file_path = Path(file)
                     file_path.name.split(".")[0]
                     file_hash = hash(f)
-                    # 4/5ths of the dataset for testing
+                    # 80% testing split
                     if file_hash % 5 != 0:
                         print(f"Training set: {file_path.name}")
                         print(f"Training set: {file_path.name[:-4]}-ss.hf5")
-                        # get_data_from_run(dir, file_path.name[:-4], detector)
-                    # 10% for val
-                    elif file_hash % 2 != 0:
-                        print(f"Validation set: {file_path.name}")
-                        print(f"Validation set: {file_path.name[:-4]}-ss.hf5")
-                        # get_data_from_run(dir, file_path.name[:-4], detector)
-                    # 10% for tst
-                    else:
-                        print(f"Test set: {file_path.name}")
-                        print(f"Test set: {file_path.name[:-4]}-ss.hf5")
-                        # get_data_from_run(dir, file_path.name[:-4], detector)
+                        volt_out, image_out, params_out = get_data_from_run(
+                            dir, file_path.name[:-4], detector
+                        )
+
+                        optimizer.zero_grad()
+
+                        slice = random.randrange(0, 11)
+                        image_crop = image_out[slice : slice + 3, :, :, :]
+                        image_next = image_out[slice + 3, :, :, :]
+                        volt_crop = volt_out[slice : slice + 3, :]
+
+                        image_crop = Variable(Tensor(image_crop))
+                        image_next = Variable(Tensor(image_next))
+                        voltages = Variable(Tensor(volt_crop))
+                        epoch_loss = 0
+
+                        print(image_crop.size())
+
+                        model_pred = model(image_crop, voltages)
+                        # Do something with the model prediction to generate the image
+                        ...
+
+                        # Calculate loss, backpropagate etc
+                        loss = critereon(image_next, model_pred)
+
+                        loss.backward()
+                        optimizer.step()
+                        epoch_loss = loss.data
+
+                        losses.append(loss.detach().numpy())
+
+                        if epoch % 1 == 0:
+                            print(f"Epoch: {epoch} Loss: {epoch_loss}")
+
             except KeyError:
                 pass
-print(count)
 
 
 ################################
 # Execution
 ################################
+
+
+# # 10% for val
+# elif file_hash % 2 != 0:
+#     print(f"Validation set: {file_path.name}")
+#     print(f"Validation set: {file_path.name[:-4]}-ss.hf5")
+#     # get_data_from_run(dir, file_path.name[:-4], detector)
+# # 10% for tst
+# else:
+#     print(f"Test set: {file_path.name}")
+#     print(f"Test set: {file_path.name[:-4]}-ss.hf5")
+#     # get_data_from_run(dir, file_path.name[:-4], detector)
