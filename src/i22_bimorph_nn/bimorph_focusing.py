@@ -65,19 +65,20 @@ class Bimorph_Focusing(torch.nn.Module):
     def __init__(self):
         super().__init__()
 
+        # Extract beam features from the detector with a 2D Convolutional Network.
         self.image_conv = torch.nn.Sequential(
             torch.nn.Conv2d(
-                in_channels=1, out_channels=32, kernel_size=(9, 9), stride=1
+                in_channels=1, out_channels=32, kernel_size=(5, 5), stride=2, padding=1
             ),
             torch.nn.ReLU(),
             torch.nn.MaxPool2d(kernel_size=(2, 2), stride=(2, 2)),
             torch.nn.Conv2d(
-                in_channels=32, out_channels=64, kernel_size=(7, 7), stride=1
+                in_channels=32, out_channels=64, kernel_size=(5, 5), stride=1
             ),
             torch.nn.ReLU(),
             torch.nn.MaxPool2d(kernel_size=(2, 2), stride=(2, 2)),
             torch.nn.Conv2d(
-                in_channels=64, out_channels=128, kernel_size=(5, 5), stride=1
+                in_channels=64, out_channels=128, kernel_size=(3, 3), stride=1
             ),
             torch.nn.ReLU(),
             torch.nn.MaxPool2d(kernel_size=(2, 2), stride=(2, 2)),
@@ -86,31 +87,29 @@ class Bimorph_Focusing(torch.nn.Module):
             ),
             torch.nn.ReLU(),
             torch.nn.MaxPool2d(kernel_size=(2, 2), stride=(2, 2)),
+            torch.nn.Flatten(),
+            torch.nn.Linear(128 * 74 * 62, 128),
+            torch.nn.ReLU(),
         )
 
+        # Linearly transform the channel voltages.
         self.volt_linear = torch.nn.Sequential(
-            torch.nn.Linear(in_features=44, out_features=200),
-            torch.nn.ReLU(),
-            torch.nn.Linear(in_features=200, out_features=128),
+            torch.nn.Linear(in_features=44, out_features=128),
             torch.nn.ReLU(),
         )
 
-        self.combine = torch.nn.Sequential(
-            torch.nn.Linear(in_features=2400128, out_features=128),
-            torch.nn.ReLU(),
-            torch.nn.Linear(in_features=128, out_features=1),
+        # Want to encode temporal information of the sequence to give 'next step'.
+        self.sequence = torch.nn.LSTM(
+            input_size=256,
+            # Using 2/3*input layer + output layer as a baseline,
+            # this hyperparameter should be optimised though!
+            hidden_size=int((2 / 3 * 256) + 44),
+            num_layers=1,
+            batch_first=True,
         )
-
-        # Want to encode temporal information of the sequence to give 'next step'
-        # self.sequence = torch.nn.LSTM(
-        #     input_size=
-        #     hidden_size=hidden_size,
-        #     num_layers=
-        #     batch_first=
-        # )
 
         # Fully connected layer for final prediction
-        # self.fc = torch.nn.Linear(hidden_size, next_numbers)
+        self.fully_connected = torch.nn.Linear(int((2 / 3 * 256) + 44), 44)
 
         # # Normalises data for faster convergence
         # self.batch1 = torch.nn.BatchNorm2d(num_features=32)
@@ -121,17 +120,49 @@ class Bimorph_Focusing(torch.nn.Module):
         # # Improve model flexability and bias
         # self.dropout = torch.nn.Dropout2d(p=0.15)
 
-    def forward(self, image_crop, voltages):
-        batch_size, sequence_length = image_crop.shape[:2]
-        print(batch_size)
-        print(sequence_length)
+    def forward(self, images, voltages):
+        batch_size, sequence_length = images.shape[:2]
 
-        # Process images at each timestep
-        # image_features = []
-        # for t in range(sequence_length):
-        #     ...
+        # Process images and voltages at each timestep
+        image_features = []
+        volt_features = []
+        for t in range(sequence_length):
+            image_batch = images[:, t]
+            volt_batch = voltages[:, t]
 
-        # return out
+            image_features.append(self.image_conv(image_batch))
+            volt_features.append(self.volt_linear(volt_batch))
+
+        image_features = torch.stack(image_features, dim=1)
+        volt_features = torch.stack(volt_features, dim=1)
+
+        print(image_features.size())
+        print(volt_features.size())
+
+        combined_features = torch.cat((image_features, volt_features), dim=-1)
+        print(combined_features.size())
+
+        LSTM_out, _ = self.sequence(combined_features)
+        print(LSTM_out.size())
+
+        out = self.fully_connected(LSTM_out[:, -1])
+        print(out.size())
+
+        # plt.imshow(
+        #     images.detach().numpy()[0,0,0],
+        #     cmap="hot",
+        #     interpolation="nearest",
+        # )
+        # plt.show()
+
+        # plt.imshow(
+        #     image_features.detach().numpy()[0,0,0],
+        #     cmap="hot",
+        #     interpolation="nearest",
+        # )
+        # plt.show()
+
+        return out
 
 
 model = Bimorph_Focusing()
@@ -173,18 +204,48 @@ for file in os.listdir(dir):
                         optimizer.zero_grad()
 
                         slice = random.randrange(0, 11)
-                        image_crop = image_out[slice : slice + 3, :, :, :]
+                        # image_crop = image_out[slice:slice + 3, :, :, :]
+                        image_crop = np.reshape(
+                            image_out,
+                            (
+                                data_set_size // images_per_sequence,
+                                images_per_sequence,
+                                1,
+                                *detector_res,
+                            ),
+                        )
                         image_next = image_out[slice + 3, :, :, :]
-                        volt_crop = volt_out[slice : slice + 3, :]
+                        # volt_crop = volt_out[slice : slice + 3, :]
+                        volt_crop = np.reshape(
+                            volt_out,
+                            (
+                                data_set_size // images_per_sequence,
+                                images_per_sequence,
+                                vfm_channels + hfm_channels,
+                            ),
+                        )
 
-                        image_crop = Variable(Tensor(image_crop))
-                        image_next = Variable(Tensor(image_next))
+                        # plt.imshow(
+                        #     image_out[11,0],
+                        #     cmap="hot",
+                        #     interpolation="nearest",
+                        # )
+                        # plt.show()
+
+                        # plt.imshow(
+                        #     image_crop[3,2,0],
+                        #     cmap="hot",
+                        #     interpolation="nearest",
+                        # )
+                        # plt.show()
+
                         voltages = Variable(Tensor(volt_crop))
+                        images = Variable(Tensor(image_crop))
                         epoch_loss = 0
 
-                        print(image_crop.size())
+                        print(images.size())
 
-                        model_pred = model(image_crop, voltages)
+                        model_pred = model(images, voltages)
                         # Do something with the model prediction to generate the image
                         ...
 
