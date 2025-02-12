@@ -7,6 +7,7 @@ import random
 from pathlib import Path
 
 import h5py
+import matplotlib.pyplot as plt
 import numpy as np
 import torch
 from torch import Tensor
@@ -136,17 +137,17 @@ class Bimorph_Focusing(torch.nn.Module):
         image_features = torch.stack(image_features, dim=1)
         volt_features = torch.stack(volt_features, dim=1)
 
-        print(image_features.size())
-        print(volt_features.size())
+        # print(image_features.size())
+        # print(volt_features.size())
 
         combined_features = torch.cat((image_features, volt_features), dim=-1)
-        print(combined_features.size())
+        # print(combined_features.size())
 
         LSTM_out, _ = self.sequence(combined_features)
-        print(LSTM_out.size())
+        # print(LSTM_out.size())
 
         out = self.fully_connected(LSTM_out[:, -1])
-        print(out.size())
+        # print(out.size())
 
         # plt.imshow(
         #     images.detach().numpy()[0,0,0],
@@ -168,8 +169,8 @@ class Bimorph_Focusing(torch.nn.Module):
 model = Bimorph_Focusing()
 
 # Define loss, optimiser and run parameters.
-critereon = torch.nn.MSELoss()
-optimizer = torch.optim.AdamW(model.parameters(), lr=1e-4)
+critereon = torch.nn.MSELoss(reduction="mean")
+optimizer = torch.optim.AdamW(model.parameters(), lr=1e-3)
 
 data_size = 10
 losses = []
@@ -179,9 +180,9 @@ losses = []
 # Training
 ################################
 
-
 count = 0
 epoch = 0
+epochs = 0
 for file in os.listdir(dir):
     epoch += 1
     if file.endswith(".nxs"):
@@ -205,6 +206,26 @@ for file in os.listdir(dir):
 
                         slice = random.randrange(0, 11)
                         # image_crop = image_out[slice:slice + 3, :, :, :]
+
+                        img_test = np.array(
+                            [image_out[i : i + 3] for i in range(len(image_out) - 3)]
+                        )
+                        volt_test = np.array(
+                            [volt_out[i : i + 3] for i in range(len(volt_out) - 3)]
+                        )
+                        img_next = np.array(
+                            [image_out[i + 3] for i in range(len(image_out) - 3)]
+                        )
+                        volt_next = np.array(
+                            [volt_out[i + 3] for i in range(len(volt_out) - 3)]
+                        )
+                        # print(np.shape(img_test))
+                        # print(np.shape(volt_test))
+                        # print(np.shape(img_next))
+                        # print(np.shape(volt_next))
+                        # print(volt_test[1][-1] == volt_next[0])
+                        # print(img_test[1][-1] == img_next[0])
+
                         image_crop = np.reshape(
                             image_out,
                             (
@@ -239,23 +260,29 @@ for file in os.listdir(dir):
                         # )
                         # plt.show()
 
-                        voltages = Variable(Tensor(volt_crop))
-                        images = Variable(Tensor(image_crop))
+                        voltages = Variable(Tensor(volt_test))
+                        images = Variable(Tensor(img_test))
+                        next_channels = Variable(Tensor(volt_next))
                         epoch_loss = 0
 
-                        print(images.size())
+                        # print(images.size())
 
                         model_pred = model(images, voltages)
                         # Do something with the model prediction to generate the image
                         ...
 
+                        # print(f"model_pred: {model_pred[1]}")
+                        # print(f"Actual: {next_channels[1]}")
+                        print(f"Diff: {model_pred[1] - next_channels[1]}")
+
                         # Calculate loss, backpropagate etc
-                        loss = critereon(image_next, model_pred)
+                        loss = critereon(model_pred, next_channels)
 
                         loss.backward()
                         optimizer.step()
                         epoch_loss = loss.data
 
+                        epochs += 1
                         losses.append(loss.detach().numpy())
 
                         if epoch % 1 == 0:
@@ -266,17 +293,10 @@ for file in os.listdir(dir):
 
 
 ################################
-# Execution
+# Testing
 ################################
 
-
-# # 10% for val
-# elif file_hash % 2 != 0:
-#     print(f"Validation set: {file_path.name}")
-#     print(f"Validation set: {file_path.name[:-4]}-ss.hf5")
-#     # get_data_from_run(dir, file_path.name[:-4], detector)
-# # 10% for tst
-# else:
-#     print(f"Test set: {file_path.name}")
-#     print(f"Test set: {file_path.name[:-4]}-ss.hf5")
-#     # get_data_from_run(dir, file_path.name[:-4], detector)
+plt.plot(range(epochs), losses)
+plt.ylabel("Loss")
+plt.xlabel("epoch")
+plt.show()
