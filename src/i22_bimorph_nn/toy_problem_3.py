@@ -109,18 +109,59 @@ def generate_gaussian2(x0, y0, sigma_x, sigma_y, A, offset, theta, data_size, de
 class Focusing_Sequence(torch.nn.Module):
     def __init__(self):
         super().__init__()
-        self.flat1 = torch.nn.Flatten(start_dim=0, end_dim=2)
-        self.fc1 = torch.nn.Linear(in_features=21, out_features=250)
-        self.fc2 = torch.nn.Linear(in_features=250, out_features=250)
-        self.fc3 = torch.nn.Linear(in_features=250, out_features=250)
-        self.fc4 = torch.nn.Linear(in_features=250, out_features=7)
+        # self.flat1 = torch.nn.Flatten(start_dim=0, end_dim=2)
+        # self.fc1 = torch.nn.Linear(in_features=21, out_features=250)
+        # self.fc2 = torch.nn.Linear(in_features=250, out_features=250)
+        # self.fc3 = torch.nn.Linear(in_features=250, out_features=250)
+        # self.fc4 = torch.nn.Linear(in_features=250, out_features=7)
+
+        self.image_conv = torch.nn.Sequential(
+            torch.nn.Conv2d(
+                in_channels=1, out_channels=16, kernel_size=(5, 5), stride=2, padding=1
+            ),
+            torch.nn.BatchNorm2d(num_features=16),
+            torch.nn.ReLU(),
+            torch.nn.MaxPool2d(kernel_size=(2, 2), stride=(2, 2)),
+            torch.nn.Conv2d(
+                in_channels=16, out_channels=32, kernel_size=(5, 5), stride=1
+            ),
+            torch.nn.BatchNorm2d(num_features=32),
+            torch.nn.ReLU(),
+            torch.nn.MaxPool2d(kernel_size=(2, 2), stride=(2, 2)),
+            torch.nn.Flatten(),
+            torch.nn.Linear(3200, 1024),
+            torch.nn.ReLU(),
+            torch.nn.Linear(1024, 128),
+            torch.nn.ReLU(),
+        )
+
+        self.sequence = torch.nn.LSTM(
+            input_size=128,
+            # Using 2/3*input layer + output layer as a baseline,
+            # this hyperparameter should be optimised though!
+            hidden_size=int((2 / 3 * 128) + 44),
+            num_layers=1,
+            batch_first=False,
+        )
+
+        self.fully_connected = torch.nn.Sequential(
+            torch.nn.Flatten(start_dim=0, end_dim=1), torch.nn.Linear(387, 7)
+        )
 
     def forward(self, image, params):
-        x = self.flat1(params)
-        x = self.fc1(x)
-        x = self.fc2(x)
-        x = self.fc3(x)
-        out = self.fc4(x)
+        # x = self.flat1(params)
+        # x = self.fc1(x)
+        # x = self.fc2(x)
+        # x = self.fc3(x)
+        # out = self.fc4(x)
+
+        x = self.image_conv(image)
+
+        LSTM_out, _ = self.sequence(x)
+
+        # out = self.fully_connected(image_features[:, -1])
+        out = self.fully_connected(LSTM_out)
+
         return out
 
 
