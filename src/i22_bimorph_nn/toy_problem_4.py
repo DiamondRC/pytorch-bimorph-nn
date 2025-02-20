@@ -9,11 +9,17 @@ import matplotlib.pyplot as plt
 import numpy as np
 import torch
 import torch.share
-from torch import Tensor
+from torch import tensor
 from torch.autograd import Variable
 from torch.nn import MSELoss
 
 os.system("clear")
+
+if torch.cuda.is_available():
+    dev = "cuda:0"
+else:
+    dev = "cpu"
+
 
 ################################
 # Data Generation
@@ -42,8 +48,8 @@ def generate_gaussian2(x0, y0, sigma_x, sigma_y, A, offset, theta, data_size):
     x, y = np.meshgrid(np.arange(-100, 100, 1), np.arange(-100, 100, 1))
 
     # Prepare numpy arrays for export
-    images_out = np.empty(shape=(data_size, 1, 200, 200))
-    volt_out = np.empty(shape=(data_size, 7))
+    images_out = np.empty(shape=(data_size, 1, 200, 200), dtype=float)
+    volt_out = np.empty(shape=(data_size, 7), dtype=float)
 
     # Deviate gaussian
     for item in range(data_size):
@@ -95,9 +101,15 @@ def generate_gaussian2(x0, y0, sigma_x, sigma_y, A, offset, theta, data_size):
     volt_out = np.flip(volt_out, 0)
 
     # Collect data into batches
-    next_images_out = np.array([images_out[i + 3] for i in range(len(images_out) - 3)])
-    images_out = np.array([images_out[i : i + 3] for i in range(len(images_out) - 3)])
-    next_volt = np.array([volt_out[i + 3] for i in range(len(volt_out) - 3)])
+    next_images_out = np.float32(
+        np.array([images_out[i + 3] for i in range(len(images_out) - 3)])
+    )
+    images_out = np.float32(
+        np.array([images_out[i : i + 3] for i in range(len(images_out) - 3)])
+    )
+    next_volt = np.float32(
+        np.array([volt_out[i + 3] for i in range(len(volt_out) - 3)])
+    )
 
     return images_out, next_images_out, next_volt
 
@@ -139,12 +151,17 @@ class Focusing_Sequence(torch.nn.Module):
 
         self.sequence = torch.nn.LSTM(
             input_size=128,
-            hidden_size=int((2 / 3 * 128) + 44),
-            num_layers=1,
+            # hidden_size=int((2 / 3 * 128) + 44),
+            hidden_size=248,
+            num_layers=3,
             batch_first=True,
+            dropout=0.5,
+            bidirectional=True,
         )
 
-        self.fully_connected = torch.nn.Sequential(torch.nn.Linear(129, 7))
+        self.fully_connected = torch.nn.Sequential(
+            torch.nn.Linear(496, 7),
+        )
 
     def forward(self, image):
         batch_size, sequence_length = image.shape[:2]
@@ -157,13 +174,13 @@ class Focusing_Sequence(torch.nn.Module):
         image_features = torch.stack(image_features, dim=0)
         LSTM_out, h_n = self.sequence(image_features)
 
-        out = self.fully_connected(LSTM_out[:, -1])
+        out = self.fully_connected(LSTM_out[:, -1, :])
 
         return out
 
 
-x0 = random.uniform(-10, 10)
-y0 = random.uniform(-10, 10)
+x0 = random.uniform(-50, 50)
+y0 = random.uniform(-50, 50)
 sigma_x = random.uniform(14, 16)
 sigma_y = sigma_x
 A = random.uniform(17, 19)
@@ -178,11 +195,14 @@ images_out, next_images_out, next_volt = generate_gaussian2(
 
 model = Focusing_Sequence()
 
+if torch.cuda.is_available():
+    model.to("cuda")
+
 # Define loss, optimiser and run parameters.
 critereon = MSELoss()
 optimizer = torch.optim.AdamW(model.parameters(), lr=2e-2)
 
-epochs = 50
+epochs = 1000
 data_size = 10
 
 losses = []
@@ -194,8 +214,8 @@ losses = []
 
 for epoch in range(epochs):
     # Seed for focusing sequence
-    x0 = random.uniform(-2, 2)
-    y0 = random.uniform(-2, 2)
+    x0 = random.uniform(-50, 50)
+    y0 = random.uniform(-50, 50)
     sigma_x = random.uniform(8, 12)
     sigma_y = sigma_x
     A = random.uniform(17, 19)
@@ -210,8 +230,8 @@ for epoch in range(epochs):
         x0, y0, sigma_x, sigma_y, A, offset, theta, data_size
     )
 
-    image = Variable(Tensor(images_out.copy()))
-    next_volt = Variable(Tensor(next_volt.copy()))
+    image = Variable(tensor(images_out.copy(), device="cuda"))
+    next_volt = Variable(tensor(next_volt.copy(), device="cuda"))
 
     # Calculate loss, backpropagate etc
     epoch_loss = 0
@@ -224,7 +244,7 @@ for epoch in range(epochs):
     epoch_loss = loss.data
 
     # Collect loss for plotting
-    losses.append(loss.detach().numpy())
+    losses.append(loss.cpu().detach().numpy())
 
     if epoch % 10 == 0:
         print(f"Epoch: {epoch} Loss: {epoch_loss}")
@@ -257,17 +277,26 @@ images_out, next_images_out, next_volt = generate_gaussian2(
     x0, y0, sigma_x, sigma_y, A, offset, theta, data_size
 )
 
-image = Variable(Tensor(images_out.copy()))
-next_image = Variable(Tensor(next_image_out.copy()))
+image = Variable(tensor(images_out.copy(), device="cuda"))
+next_image = Variable(tensor(next_image_out.copy(), device="cuda"))
 
 # Model prediction
 prediction = model(image)
 
-prediction_copy = prediction.detach().numpy().copy()
+prediction_copy = prediction.cpu().detach().numpy().copy()
 x, y = np.meshgrid(np.arange(-100, 100, 1), np.arange(-100, 100, 1))
 
-for i in range(7):
-    images_out = elliptical_gaussian(x, y, *prediction_copy[i])
-    plt.subplot(1, 7, i + 1)
-    plt.imshow(images_out, cmap="hot", interpolation="nearest")
+# Compare model prediction to data
+for j in range(7):
+    plt.subplot(3, 7, j + 1)
+    plt.imshow(next_images_out[j, 0], cmap="hot", interpolation="nearest")
+
+    model_images_out = elliptical_gaussian(x, y, *prediction_copy[j])
+    plt.subplot(3, 7, j + 8)
+    plt.imshow(model_images_out, cmap="hot", interpolation="nearest")
+
+    plt.subplot(3, 7, j + 15)
+    plt.imshow(
+        next_images_out[j, 0] - model_images_out, cmap="hot", interpolation="nearest"
+    )
 plt.show()
