@@ -125,7 +125,7 @@ class Focusing_Sequence(torch.nn.Module):
 
         self.image_conv = torch.nn.Sequential(
             torch.nn.Conv2d(
-                in_channels=1, out_channels=16, kernel_size=(3, 3), stride=2, padding=1
+                in_channels=1, out_channels=16, kernel_size=(5, 5), stride=1, padding=1
             ),
             torch.nn.BatchNorm2d(num_features=16),
             torch.nn.ReLU(),
@@ -140,19 +140,19 @@ class Focusing_Sequence(torch.nn.Module):
             torch.nn.BatchNorm2d(num_features=64),
             torch.nn.ReLU(),
             torch.nn.MaxPool2d(kernel_size=(2, 2), stride=(2, 2)),
+            torch.nn.Conv2d(in_channels=64, out_channels=128, kernel_size=(1, 1)),
+            torch.nn.BatchNorm2d(num_features=128),
+            torch.nn.ReLU(),
+            torch.nn.MaxPool2d(kernel_size=(2, 2), stride=(2, 2)),
             torch.nn.Flatten(),
-            torch.nn.Linear(7744, 4096),
-            torch.nn.ReLU(),
-            torch.nn.Linear(4096, 1024),
-            torch.nn.ReLU(),
-            torch.nn.Linear(1024, 128),
+            torch.nn.Linear(15488, 128),
             torch.nn.ReLU(),
         )
 
         self.sequence = torch.nn.LSTM(
             input_size=128,
-            # hidden_size=int((2 / 3 * 128) + 44),
-            hidden_size=248,
+            hidden_size=int((2 / 3 * 128) + 44),
+            # hidden_size=248,
             num_layers=3,
             batch_first=True,
             dropout=0.5,
@@ -160,7 +160,7 @@ class Focusing_Sequence(torch.nn.Module):
         )
 
         self.fully_connected = torch.nn.Sequential(
-            torch.nn.Linear(496, 7),
+            torch.nn.Linear(128, 7),
         )
 
     def forward(self, image):
@@ -174,7 +174,7 @@ class Focusing_Sequence(torch.nn.Module):
         image_features = torch.stack(image_features, dim=0)
         LSTM_out, h_n = self.sequence(image_features)
 
-        out = self.fully_connected(LSTM_out[:, -1, :])
+        out = self.fully_connected(image_features[:, -1, :])
 
         return out
 
@@ -193,20 +193,31 @@ images_out, next_images_out, next_volt = generate_gaussian2(
     x0, y0, sigma_x, sigma_y, A, offset, theta, data_size
 )
 
+
+# Pre-set weights in all model layers.
+def init_weights(m):
+    if isinstance(m, torch.nn.Conv2d) or isinstance(m, torch.nn.Linear):
+        torch.nn.init.kaiming_uniform_(m.weight, mode="fan_in", nonlinearity="relu")
+        if m.bias is not None:
+            torch.nn.init.zeros_(m.bias)
+
+
 model = Focusing_Sequence()
+model.apply(init_weights)
 
 if torch.cuda.is_available():
     model.to("cuda")
 
 # Define loss, optimiser and run parameters.
 critereon = MSELoss()
-optimizer = torch.optim.AdamW(model.parameters(), lr=2e-2)
+optimizer = torch.optim.AdamW(model.parameters(), lr=1e-3)
 
 epochs = 1000
 data_size = 10
 
 losses = []
-
+layers = []
+grads = []
 
 ################################
 # Training
@@ -223,8 +234,6 @@ for epoch in range(epochs):
     theta = random.uniform(50, 70)
     data_size = 10
 
-    optimizer.zero_grad()
-
     # Generate focusing sequence
     images_out, next_image_out, next_volt = generate_gaussian2(
         x0, y0, sigma_x, sigma_y, A, offset, theta, data_size
@@ -237,9 +246,11 @@ for epoch in range(epochs):
     epoch_loss = 0
     model_pred = model(image)
 
+    optimizer.zero_grad()
     loss = critereon(model_pred, next_volt)
 
     loss.backward()
+    torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
     optimizer.step()
     epoch_loss = loss.data
 
@@ -248,6 +259,14 @@ for epoch in range(epochs):
 
     if epoch % 10 == 0:
         print(f"Epoch: {epoch} Loss: {epoch_loss}")
+
+    if epochs == 0 or epochs % 50 == 0:
+        for name, param in model.named_parameters():
+            if "weight" in name:  # Only consider weight parameters
+                layers.append(name)
+                # Compute L2 norm (Frobenius norm) of the weights
+                grad = torch.norm(param, p=2).item()
+                grads.append(grad)
 
 
 ################################
@@ -283,6 +302,15 @@ next_image = Variable(tensor(next_image_out.copy(), device="cuda"))
 # Model prediction
 prediction = model(image)
 
+print("=" * 20)
+print(f"x0: {prediction[:, 0].cpu().detach().numpy()}")
+print(f"y0: {prediction[:, 1].cpu().detach().numpy()}")
+print(f"sigma_x: {prediction[:, 2].cpu().detach().numpy()}")
+print(f"sigma_y: {prediction[:, 3].cpu().detach().numpy()}")
+print(f"A: {prediction[:, 4].cpu().detach().numpy()}")
+print(f"offset: {prediction[:, 5].cpu().detach().numpy()}")
+print(f"theta: {prediction[:, 6].cpu().detach().numpy()}")
+
 prediction_copy = prediction.cpu().detach().numpy().copy()
 x, y = np.meshgrid(np.arange(-100, 100, 1), np.arange(-100, 100, 1))
 
@@ -300,3 +328,18 @@ for j in range(7):
         next_images_out[j, 0] - model_images_out, cmap="hot", interpolation="nearest"
     )
 plt.show()
+
+for name, param in model.named_parameters():
+    if param.grad is not None:
+        plt.figure(figsize=(6, 4))
+        plt.hist(
+            param.grad.cpu().view(-1).detach().numpy(),
+            bins=200,
+            alpha=0.7,
+            color="blue",
+        )
+        plt.title(f"Gradient Histogram for {name}")
+        plt.xlabel("Gradient Value")
+        plt.ylabel("Frequency")
+        plt.grid(True)
+        plt.show()
