@@ -26,6 +26,7 @@ else:
 
 
 def elliptical_gaussian(x, y, x0, y0, sigma_x, sigma_y, A, offset, theta):
+    """Generates an individual 2D Guassian image with the given parameters"""
     a = (np.cos(theta) ** 2) / (2 * sigma_x**2) + (np.sin(theta) ** 2) / (
         2 * sigma_y**2
     )
@@ -41,19 +42,18 @@ def elliptical_gaussian(x, y, x0, y0, sigma_x, sigma_y, A, offset, theta):
 
 
 def generate_gaussian2(x0, y0, sigma_x, sigma_y, A, offset, theta, data_size):
-    """Function to fit, returns 2D gaussian function"""
+    """Creates the 2D gaussian time sequence"""
 
     # Create the grid
     x, y = np.meshgrid(np.arange(-100, 100, 1), np.arange(-100, 100, 1))
 
-    # Prepare numpy arrays for export
+    # Prepare numpy arrays for export.
     images_out = np.empty(shape=(data_size, 1, 200, 200), dtype=float)
     volt_out = np.empty(shape=(data_size, 7), dtype=float)
 
-    # Deviate gaussian
+    # Create time series. Start small and deviate overtime.
+    # Non-linear, reproducible 'mirror deviation'.
     for item in range(data_size):
-        # Non-linear, reproducible 'mirror deviation'
-        # Model will learn this equation.
         if item % 2 == 1:
             x0 += (item / 40 * np.cos(item)) * 10
             y0 -= (item / 20) * 10
@@ -95,16 +95,18 @@ def generate_gaussian2(x0, y0, sigma_x, sigma_y, A, offset, theta, data_size):
             np.random.random(np.shape(images_out[item, 0, :, :])) * item / 20
         )
 
-    # Reverse order of datasets
+    # Reverse image order, want unfocused to focused.
     images_out = np.flip(images_out, 0)
     volt_out = np.flip(volt_out, 0)
 
-    # Collect data into batches
-    next_images_out = np.float32(
-        np.array([images_out[i + 3] for i in range(len(images_out) - 3)])
-    )
+    # Sliding window sequence into batches of three images.
     images_out = np.float32(
         np.array([images_out[i : i + 3] for i in range(len(images_out) - 3)])
+    )
+
+    # 'next step' for each image batch.
+    next_images_out = np.float32(
+        np.array([images_out[i + 3] for i in range(len(images_out) - 3)])
     )
     next_volt = np.float32(
         np.array([volt_out[i + 3] for i in range(len(volt_out) - 3)])
@@ -119,45 +121,56 @@ def generate_gaussian2(x0, y0, sigma_x, sigma_y, A, offset, theta, data_size):
 
 
 class Focusing_Sequence(torch.nn.Module):
+    """Conv-LSTM Model. Takes image and extracts features,
+    then processes them the LSTM to learn how they change over time."""
+
     def __init__(self):
         super().__init__()
 
         self.image_conv = torch.nn.Sequential(
+            # Extract features from grayscale image.
             torch.nn.Conv2d(in_channels=1, out_channels=16, kernel_size=(5, 5)),
             torch.nn.BatchNorm2d(num_features=16),
             torch.nn.LeakyReLU(),
             torch.nn.Dropout2d(p=0.2),
             torch.nn.MaxPool2d(kernel_size=(2, 2), stride=(2, 2)),
+            #
             torch.nn.Conv2d(in_channels=16, out_channels=32, kernel_size=(3, 3)),
             torch.nn.BatchNorm2d(num_features=32),
             torch.nn.LeakyReLU(),
             torch.nn.Dropout2d(p=0.2),
             torch.nn.MaxPool2d(kernel_size=(2, 2), stride=(2, 2)),
+            #
             torch.nn.Conv2d(in_channels=32, out_channels=64, kernel_size=(3, 3)),
             torch.nn.BatchNorm2d(num_features=64),
             torch.nn.LeakyReLU(),
             torch.nn.Dropout2d(p=0.2),
             torch.nn.MaxPool2d(kernel_size=(2, 2), stride=(2, 2)),
+            #
             torch.nn.Conv2d(in_channels=64, out_channels=128, kernel_size=(3, 3)),
             torch.nn.BatchNorm2d(num_features=128),
             torch.nn.LeakyReLU(),
             torch.nn.Dropout2d(p=0.2),
-            torch.nn.MaxPool2d(kernel_size=(2, 2), stride=(2, 2)),
+            torch.nn.MaxPool2d(kernel_size=(2, 2), stride=(2, 2)),  #
+            #
             torch.nn.Conv2d(in_channels=128, out_channels=256, kernel_size=(3, 3)),
             torch.nn.BatchNorm2d(num_features=256),
             torch.nn.LeakyReLU(),
             torch.nn.Dropout2d(p=0.2),
             torch.nn.MaxPool2d(kernel_size=(2, 2), stride=(2, 2)),
+            #
             torch.nn.Conv2d(in_channels=256, out_channels=512, kernel_size=(1, 1)),
             torch.nn.BatchNorm2d(num_features=512),
             torch.nn.LeakyReLU(),
             torch.nn.Dropout2d(p=0.2),
             torch.nn.MaxPool2d(kernel_size=(2, 2), stride=(2, 2)),
+            #
             torch.nn.Conv2d(in_channels=512, out_channels=1024, kernel_size=(1, 1)),
             torch.nn.BatchNorm2d(num_features=1024),
             torch.nn.LeakyReLU(),
             torch.nn.Dropout2d(p=0.2),
             torch.nn.MaxPool2d(kernel_size=(2, 2), stride=(2, 2)),
+            # Map features to smaller size for LSTM.
             torch.nn.Flatten(),
             torch.nn.Linear(1024, 128),
             torch.nn.Dropout(p=0.5),
@@ -175,11 +188,10 @@ class Focusing_Sequence(torch.nn.Module):
         )
 
         self.LSTM_out = (torch.nn.LayerNorm(int((2 / 3 * 128) + 44)),)
-        # self.LSTM_out = torch.nn.LayerNorm(32),
 
+        # Map LSTM hidden layer to channels.
         self.fully_connected = torch.nn.Sequential(
             torch.nn.Linear(129, 7),
-            # torch.nn.Linear(32, 7),
             torch.nn.Dropout(p=0.5),
             torch.nn.LayerNorm(7),
             torch.nn.LeakyReLU(),
@@ -189,13 +201,18 @@ class Focusing_Sequence(torch.nn.Module):
         batch_size, sequence_length = image.shape[:2]
         image_features = []
 
+        # Process each batch of images from the input.
         for t in range(batch_size):
             image_batch = image[t, :]
+            # Extract image features from each batch.
             image_features.append(self.image_conv(image_batch))
 
         image_features = torch.stack(image_features, dim=0)
-        LSTM_out, h_n = self.sequence(image_features)
 
+        # Extract time features
+        LSTM_out, h_n = self.sequence(image_features)
+        # Take prediction from final image in batch.
+        # Potentially losing  important temporal infromation here.
         out = self.fully_connected(LSTM_out[:, -1, :])
 
         return out
@@ -204,8 +221,6 @@ class Focusing_Sequence(torch.nn.Module):
 # Pre-set weights in all model layers.
 def init_weights(m):
     if isinstance(m, torch.nn.Conv2d) or isinstance(m, torch.nn.Linear):
-        # torch.nn.init.kaiming_uniform_(m.weight, mode="fan_in",
-        # nonlinearity="leaky_relu")
         torch.nn.init.kaiming_normal_(
             m.weight, mode="fan_in", nonlinearity="leaky_relu"
         )
@@ -213,6 +228,7 @@ def init_weights(m):
             torch.nn.init.zeros_(m.bias)
 
 
+# Generate consistent seeds
 def generate_seed():
     x0 = random.uniform(-80, 80)
     y0 = random.uniform(-80, 80)
@@ -242,15 +258,15 @@ losses = []
 layers = []
 grads = []
 
+
 ################################
 # Training
 ################################
 
 for epoch in range(epochs):
-    # Seed for focusing sequence
+    # Generate a focusing sequence.
     x0, y0, sigma_x, sigma_y, A, offset, theta, data_size = generate_seed()
 
-    # Generate focusing sequence
     images_out, next_image_out, next_volt = generate_gaussian2(
         x0, y0, sigma_x, sigma_y, A, offset, theta, data_size
     )
@@ -258,15 +274,17 @@ for epoch in range(epochs):
     image = Variable(tensor(images_out.copy(), device="cuda"))
     next_volt = Variable(tensor(next_volt.copy(), device="cuda"))
 
+    # Normalise the images and 'voltages'.
     norm_img = transforms.Normalize(mean=torch.mean(image), std=torch.std(image))
 
+    # Potentially using different techniques here could be erroneous?
     row_mean = next_volt.mean(dim=1, keepdim=True)
     row_std = next_volt.std(dim=1, keepdim=True)
     norm_next_volt = (next_volt - row_mean) / row_std
 
     norm_images_out = norm_img(image)
 
-    # Calculate loss, backpropagate etc
+    # Calculate prediction, loss, backpropagate etc.
     epoch_loss = 0
     model_pred = model(norm_images_out)
 
@@ -278,17 +296,18 @@ for epoch in range(epochs):
     optimizer.step()
     epoch_loss = loss.data
 
-    # Collect loss for plotting
+    # Collect loss on CPU for plotting.
     losses.append(loss.cpu().detach().numpy())
 
     if epoch % 10 == 0:
         print(f"Epoch: {epoch} Loss: {epoch_loss}")
 
+    # Collect debug information relating to gradient values.
     if epochs == 0 or epochs % 50 == 0:
         for name, param in model.named_parameters():
-            if "weight" in name:  # Only consider weight parameters
+            if "weight" in name:  # Only consider weight parameters.
                 layers.append(name)
-                # Compute L2 norm (Frobenius norm) of the weights
+                # Computing L2 norm (Frobenius norm) of the weights.
                 grad = torch.norm(param, p=2).item()
                 grads.append(grad)
 
@@ -307,14 +326,14 @@ plt.show()
 
 
 for _ in range(50):
-    # Seed for testing
+    # Generate focusing sequence
     x0, y0, sigma_x, sigma_y, A, offset, theta, data_size = generate_seed()
 
-    # Generate focusing sequence
     images_out, next_images_out, next_volt = generate_gaussian2(
         x0, y0, sigma_x, sigma_y, A, offset, theta, data_size
     )
 
+    # Normalise inputs.
     image = Variable(tensor(images_out.copy(), device="cuda"))
     next_volt = Variable(tensor(next_volt.copy(), device="cuda"))
 
@@ -329,8 +348,10 @@ for _ in range(50):
     # Model prediction
     prediction = model(norm_images_out)
 
+    # Denormalise
     prediction = prediction * row_std + row_mean
 
+    # Debug out
     print("=" * 20)
     print(f"x0: {prediction[:, 0].cpu().detach().numpy()}")
     print(f"y0: {prediction[:, 1].cpu().detach().numpy()}")
@@ -340,6 +361,7 @@ for _ in range(50):
     print(f"offset: {prediction[:, 5].cpu().detach().numpy()}")
     print(f"theta: {prediction[:, 6].cpu().detach().numpy()}")
 
+    # Copy/grid for plotting
     prediction_copy = prediction.cpu().detach().numpy().copy()
     x, y = np.meshgrid(np.arange(-100, 100, 1), np.arange(-100, 100, 1))
 
@@ -352,6 +374,7 @@ for _ in range(50):
         plt.subplot(3, 7, j + 8)
         # plt.imshow(model_images_out, cmap="hot", interpolation="nearest",
         # vmin=np.min(next_images_out[j]), vmax=np.max(next_images_out[j]))
+        # ^Switch to this for a like-to-like comparison of model and actual.
         plt.imshow(model_images_out, cmap="hot", interpolation="nearest")
 
         plt.subplot(3, 7, j + 15)
@@ -362,6 +385,7 @@ for _ in range(50):
         )
     plt.show()
 
+# Plot gradient values for debugging.
 for name, param in model.named_parameters():
     if param.grad is not None:
         plt.figure(figsize=(6, 4))
