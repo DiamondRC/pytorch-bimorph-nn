@@ -213,6 +213,18 @@ def init_weights(m):
             torch.nn.init.zeros_(m.bias)
 
 
+def generate_seed():
+    x0 = random.uniform(-80, 80)
+    y0 = random.uniform(-80, 80)
+    sigma_x = random.uniform(8, 12)
+    sigma_y = sigma_x
+    A = random.uniform(17, 19)
+    offset = random.uniform(0, 0)
+    theta = random.uniform(20, 160)
+    data_size = 10
+    return x0, y0, sigma_x, sigma_y, A, offset, theta, data_size
+
+
 model = Focusing_Sequence()
 model.apply(init_weights)
 
@@ -223,13 +235,12 @@ if torch.cuda.is_available():
 criterion = torch.nn.HuberLoss()
 optimizer = torch.optim.Adam(model.parameters(), lr=2e-4)
 
-epochs = 3000000
+epochs = 30000
 data_size = 10
 
 losses = []
 layers = []
 grads = []
-
 
 ################################
 # Training
@@ -237,14 +248,7 @@ grads = []
 
 for epoch in range(epochs):
     # Seed for focusing sequence
-    x0 = random.uniform(-80, 80)
-    y0 = random.uniform(-80, 80)
-    sigma_x = random.uniform(8, 12)
-    sigma_y = sigma_x
-    A = random.uniform(17, 19)
-    offset = random.uniform(0, 0)
-    theta = random.uniform(20, 160)
-    data_size = 10
+    x0, y0, sigma_x, sigma_y, A, offset, theta, data_size = generate_seed()
 
     # Generate focusing sequence
     images_out, next_image_out, next_volt = generate_gaussian2(
@@ -304,14 +308,7 @@ plt.show()
 
 for _ in range(50):
     # Seed for testing
-    x0 = random.uniform(-80, 80)
-    y0 = random.uniform(-80, 80)
-    sigma_x = random.uniform(8, 12)
-    sigma_y = sigma_x
-    A = random.uniform(17, 19)
-    offset = random.uniform(0, 0)
-    theta = random.uniform(20, 160)
-    data_size = 10
+    x0, y0, sigma_x, sigma_y, A, offset, theta, data_size = generate_seed()
 
     # Generate focusing sequence
     images_out, next_images_out, next_volt = generate_gaussian2(
