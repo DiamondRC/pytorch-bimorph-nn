@@ -99,15 +99,16 @@ def generate_gaussian2(x0, y0, sigma_x, sigma_y, A, offset, theta, data_size):
     images_out = np.flip(images_out, 0)
     volt_out = np.flip(volt_out, 0)
 
+    next_images_out = np.float32(
+        np.array([images_out[i + 3] for i in range(len(images_out) - 3)])
+    )
+
     # Sliding window sequence into batches of three images.
     images_out = np.float32(
         np.array([images_out[i : i + 3] for i in range(len(images_out) - 3)])
     )
 
     # 'next step' for each image batch.
-    next_images_out = np.float32(
-        np.array([images_out[i + 3] for i in range(len(images_out) - 3)])
-    )
     next_volt = np.float32(
         np.array([volt_out[i + 3] for i in range(len(volt_out) - 3)])
     )
