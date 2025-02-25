@@ -45,11 +45,12 @@ def generate_gaussian2(x0, y0, sigma_x, sigma_y, A, offset, theta, data_size):
     """Creates the 2D gaussian time sequence"""
 
     # Create the grid
-    x, y = np.meshgrid(np.arange(-100, 100, 1), np.arange(-100, 100, 1))
+    x, y = np.meshgrid(np.arange(-112, 112, 1), np.arange(-112, 112, 1))
 
     # Prepare numpy arrays for export.
-    images_out = np.empty(shape=(data_size, 1, 200, 200), dtype=float)
+    images_out = np.empty(shape=(data_size, 1, 224, 224), dtype=float)
     volt_out = np.empty(shape=(data_size, 7), dtype=float)
+    volts_out = np.empty(shape=(data_size, 7), dtype=float)
 
     # Create time series. Start small and deviate overtime.
     # Non-linear, reproducible 'mirror deviation'.
@@ -113,7 +114,11 @@ def generate_gaussian2(x0, y0, sigma_x, sigma_y, A, offset, theta, data_size):
         np.array([volt_out[i + 3] for i in range(len(volt_out) - 3)])
     )
 
-    return images_out, next_images_out, next_volt
+    volts_out = np.float32(
+        np.array([volt_out[i : i + 3] for i in range(len(volt_out) - 3)])
+    )
+
+    return images_out, next_images_out, next_volt, volts_out
 
 
 ################################
@@ -134,7 +139,7 @@ class Focusing_Sequence(torch.nn.Module):
             torch.nn.BatchNorm2d(num_features=16),
             torch.nn.LeakyReLU(),
             torch.nn.Dropout2d(p=0.2),
-            torch.nn.MaxPool2d(kernel_size=(2, 2), stride=(2, 2)),
+            # torch.nn.MaxPool2d(kernel_size=(2, 2), stride=(2, 2)),
             #
             torch.nn.Conv2d(in_channels=16, out_channels=32, kernel_size=(3, 3)),
             torch.nn.BatchNorm2d(num_features=32),
@@ -146,19 +151,19 @@ class Focusing_Sequence(torch.nn.Module):
             torch.nn.BatchNorm2d(num_features=64),
             torch.nn.LeakyReLU(),
             torch.nn.Dropout2d(p=0.2),
-            torch.nn.MaxPool2d(kernel_size=(2, 2), stride=(2, 2)),
+            # torch.nn.MaxPool2d(kernel_size=(2, 2), stride=(2, 2)),
             #
             torch.nn.Conv2d(in_channels=64, out_channels=128, kernel_size=(3, 3)),
             torch.nn.BatchNorm2d(num_features=128),
             torch.nn.LeakyReLU(),
             torch.nn.Dropout2d(p=0.2),
-            torch.nn.MaxPool2d(kernel_size=(2, 2), stride=(2, 2)),  #
+            torch.nn.MaxPool2d(kernel_size=(2, 2), stride=(2, 2)),
             #
             torch.nn.Conv2d(in_channels=128, out_channels=256, kernel_size=(3, 3)),
             torch.nn.BatchNorm2d(num_features=256),
             torch.nn.LeakyReLU(),
             torch.nn.Dropout2d(p=0.2),
-            torch.nn.MaxPool2d(kernel_size=(2, 2), stride=(2, 2)),
+            # torch.nn.MaxPool2d(kernel_size=(2, 2), stride=(2, 2)),
             #
             torch.nn.Conv2d(in_channels=256, out_channels=512, kernel_size=(1, 1)),
             torch.nn.BatchNorm2d(num_features=512),
@@ -166,49 +171,61 @@ class Focusing_Sequence(torch.nn.Module):
             torch.nn.Dropout2d(p=0.2),
             torch.nn.MaxPool2d(kernel_size=(2, 2), stride=(2, 2)),
             #
-            torch.nn.Conv2d(in_channels=512, out_channels=1024, kernel_size=(1, 1)),
-            torch.nn.BatchNorm2d(num_features=1024),
-            torch.nn.LeakyReLU(),
-            torch.nn.Dropout2d(p=0.2),
-            torch.nn.MaxPool2d(kernel_size=(2, 2), stride=(2, 2)),
+            # torch.nn.Conv2d(in_channels=512, out_channels=1024, kernel_size=(1, 1)),
+            # torch.nn.BatchNorm2d(num_features=1024),
+            # torch.nn.LeakyReLU(),
+            # torch.nn.Dropout2d(p=0.2),
+            # torch.nn.MaxPool2d(kernel_size=(2, 2), stride=(2, 2)),
             # Map features to smaller size for LSTM.
-            torch.nn.Flatten(),
-            torch.nn.Linear(1024, 128),
-            torch.nn.Dropout(p=0.5),
-            torch.nn.LayerNorm(128),
-            torch.nn.LeakyReLU(),
+            # torch.nn.Flatten(),
+            # torch.nn.Linear(320000, 1024),
+            # torch.nn.Dropout(p=0.5),
+            # torch.nn.LayerNorm(1024),
+            # torch.nn.LeakyReLU(),
         )
 
         self.sequence = torch.nn.LSTM(
-            input_size=128,
-            hidden_size=int((2 / 3 * 128) + 44),
+            input_size=1024,
+            hidden_size=int((2 / 3 * 1024) + 44),
             num_layers=7,
             batch_first=True,
             dropout=0.4,
             bidirectional=False,
         )
 
-        self.LSTM_out = (torch.nn.LayerNorm(int((2 / 3 * 128) + 44)),)
+        self.LSTM_out = (torch.nn.LayerNorm(int((2 / 3 * 1024) + 44)),)
 
         # Map LSTM hidden layer to channels.
         self.fully_connected = torch.nn.Sequential(
-            torch.nn.Linear(129, 7),
+            torch.nn.Linear(726, 7),
             torch.nn.Dropout(p=0.5),
             torch.nn.LayerNorm(7),
             torch.nn.LeakyReLU(),
         )
 
-    def forward(self, image):
+    def forward(self, image, channel):
         batch_size, sequence_length = image.shape[:2]
         image_features = []
+        channel_info = []
 
+        print(image.size())
+        print(channel.size())
         # Process each batch of images from the input.
         for t in range(batch_size):
             image_batch = image[t, :]
+            channel_batch = channel[t, :]
             # Extract image features from each batch.
             image_features.append(self.image_conv(image_batch))
+            channel_info.append(channel_batch)
 
+        print(image_features[0].size())
         image_features = torch.stack(image_features, dim=0)
+        # channel_info = torch.stack(channel_info, dim=0)
+
+        print(image_features.size())
+        # print(channel_info.size())
+
+        # image_features = torch.concat((image_features, channel_info), dim=0)
 
         # Extract time features
         LSTM_out, h_n = self.sequence(image_features)
@@ -252,7 +269,7 @@ if torch.cuda.is_available():
 criterion = torch.nn.HuberLoss()
 optimizer = torch.optim.Adam(model.parameters(), lr=2e-4)
 
-epochs = 30000
+epochs = 3000
 data_size = 10
 
 losses = []
@@ -268,12 +285,13 @@ for epoch in range(epochs):
     # Generate a focusing sequence.
     x0, y0, sigma_x, sigma_y, A, offset, theta, data_size = generate_seed()
 
-    images_out, next_image_out, next_volt = generate_gaussian2(
+    images_out, next_image_out, next_volt, volts_out = generate_gaussian2(
         x0, y0, sigma_x, sigma_y, A, offset, theta, data_size
     )
 
     image = Variable(tensor(images_out.copy(), device="cuda"))
     next_volt = Variable(tensor(next_volt.copy(), device="cuda"))
+    channel = Variable(tensor(volts_out.copy(), device="cuda"))
 
     # Normalise the images and 'voltages'.
     norm_img = transforms.Normalize(mean=torch.mean(image), std=torch.std(image))
@@ -283,11 +301,15 @@ for epoch in range(epochs):
     row_std = next_volt.std(dim=1, keepdim=True)
     norm_next_volt = (next_volt - row_mean) / row_std
 
+    row_mean = channel.mean(dim=1, keepdim=True)
+    row_std = channel.std(dim=1, keepdim=True)
+    norm_channel = (channel - row_mean) / row_std
+
     norm_images_out = norm_img(image)
 
     # Calculate prediction, loss, backpropagate etc.
     epoch_loss = 0
-    model_pred = model(norm_images_out)
+    model_pred = model(norm_images_out, norm_channel)
 
     optimizer.zero_grad()
     loss = criterion(model_pred, norm_next_volt)
@@ -330,13 +352,14 @@ for _ in range(50):
     # Generate focusing sequence
     x0, y0, sigma_x, sigma_y, A, offset, theta, data_size = generate_seed()
 
-    images_out, next_images_out, next_volt = generate_gaussian2(
+    images_out, next_images_out, next_volt, volts_out = generate_gaussian2(
         x0, y0, sigma_x, sigma_y, A, offset, theta, data_size
     )
 
     # Normalise inputs.
     image = Variable(tensor(images_out.copy(), device="cuda"))
     next_volt = Variable(tensor(next_volt.copy(), device="cuda"))
+    channel = Variable(tensor(volts_out.copy(), device="cuda"))
 
     norm_img = transforms.Normalize(mean=torch.mean(image), std=torch.std(image))
 
@@ -344,10 +367,14 @@ for _ in range(50):
     row_std = next_volt.std(dim=1, keepdim=True)
     norm_next_volt = (next_volt - row_mean) / row_std
 
+    row_mean = channel.mean(dim=1, keepdim=True)
+    row_std = channel.std(dim=1, keepdim=True)
+    norm_channel = (channel - row_mean) / row_std
+
     norm_images_out = norm_img(image)
 
     # Model prediction
-    prediction = model(norm_images_out)
+    prediction = model(norm_images_out, norm_channel)
 
     # Denormalise
     prediction = prediction * row_std + row_mean
@@ -364,7 +391,7 @@ for _ in range(50):
 
     # Copy/grid for plotting
     prediction_copy = prediction.cpu().detach().numpy().copy()
-    x, y = np.meshgrid(np.arange(-100, 100, 1), np.arange(-100, 100, 1))
+    x, y = np.meshgrid(np.arange(-112, 112, 1), np.arange(-112, 112, 1))
 
     # Compare model prediction to data
     for j in range(7):
