@@ -45,10 +45,10 @@ def generate_gaussian2(x0, y0, sigma_x, sigma_y, A, theta, data_size):
     """Creates the 2D gaussian time sequence"""
 
     # Create the grid
-    x, y = np.meshgrid(np.arange(-100, 100, 1), np.arange(-100, 100, 1))
+    x, y = np.meshgrid(np.arange(-128, 128, 1), np.arange(-128, 128, 1))
 
     # Prepare numpy arrays for export.
-    images_out = np.empty(shape=(data_size, 1, 200, 200), dtype=float)
+    images_out = np.empty(shape=(data_size, 1, 256, 256), dtype=float)
     volt_out = np.empty(shape=(data_size, 6), dtype=float)
 
     # Create time series. Start small and deviate overtime.
@@ -128,35 +128,51 @@ class Focusing_Sequence(torch.nn.Module):
         super().__init__()
 
         self.image_conv = torch.nn.Sequential(
-            torch.nn.Conv2d(in_channels=1, out_channels=16, kernel_size=(5, 5)),
+            # Extract image features.
+            torch.nn.Conv2d(
+                in_channels=1, out_channels=16, kernel_size=(5, 5), padding=2
+            ),
             torch.nn.BatchNorm2d(num_features=16),
             torch.nn.LeakyReLU(),
             torch.nn.AvgPool2d(2, 2),
             #
-            torch.nn.Conv2d(in_channels=16, out_channels=32, kernel_size=(3, 3)),
+            torch.nn.Conv2d(
+                in_channels=16, out_channels=32, kernel_size=(3, 3), padding=1
+            ),
             torch.nn.BatchNorm2d(num_features=32),
             torch.nn.LeakyReLU(),
             torch.nn.Dropout2d(p=0.2),
             torch.nn.MaxPool2d(kernel_size=(2, 2), stride=(2, 2)),
             #
-            torch.nn.Conv2d(in_channels=32, out_channels=64, kernel_size=(3, 3)),
+            torch.nn.Conv2d(
+                in_channels=32, out_channels=64, kernel_size=(3, 3), padding=1
+            ),
             torch.nn.BatchNorm2d(num_features=64),
             torch.nn.LeakyReLU(),
             torch.nn.Dropout2d(p=0.2),
-            torch.nn.AvgPool2d(2, 2),
+            #
+            torch.nn.Conv2d(
+                in_channels=64, out_channels=128, kernel_size=(3, 3), padding=1
+            ),
+            torch.nn.BatchNorm2d(num_features=128),
+            torch.nn.LeakyReLU(),
+            torch.nn.Dropout2d(p=0.2),
+            # Collape to number of features by discarding pixel leftovers.
+            torch.nn.AdaptiveAvgPool2d((1, 1)),
         )
 
-        hidden_size = int((2 / 3 * 33856) + 44)
+        hidden_size = int((2 / 3 * 128) + 44)
         self.sequence = torch.nn.LSTM(
-            input_size=33856,
+            # Learn temporal component of values.
+            input_size=128,
             hidden_size=hidden_size,
-            num_layers=1,
+            num_layers=2,
             batch_first=True,
-            dropout=0.4,
+            dropout=0.3,
             bidirectional=False,
         )
 
-        self.LSTM_out = (torch.nn.LayerNorm(hidden_size),)
+        self.LSTM_out_norm = (torch.nn.LayerNorm(hidden_size),)
 
         self.flat = torch.nn.Sequential(
             torch.nn.Flatten(),
@@ -185,30 +201,24 @@ class Focusing_Sequence(torch.nn.Module):
 
     def forward(self, image, volts_out):
         batch_size, sequence_length = image.shape[:2]
-        total_features = []
+        features = []
 
         # Process each batch of images from the input.
         for t in range(batch_size):
             image_batch = image[t, :]
+            features.append(self.flat(self.image_conv(image_batch)))
+        image_features = torch.stack(features, dim=0)
+        # Process features through LSTM
+        LSTM_out, _ = self.sequence(image_features)
 
-            # Extract image features from each batch.
-            x = self.image_conv(image_batch)
-            # print(x.size())
-            x = self.flat(x)
+        # Determine params with seperate linear transforms.
+        position = self.pos(LSTM_out[:, -1])
+        sigmax = self.sigmax(LSTM_out[:, -1])
+        sigmay = self.sigmay(LSTM_out[:, -1])
+        amplitude = self.A(LSTM_out[:, -1])
+        theta = self.theta(LSTM_out[:, -1])
 
-            x = self.sequence(x)
-
-            position = self.pos(x[-1, :])
-            sigmax = self.sigmax(x[-1, :])
-            sigmay = self.sigmay(x[-1, :])
-            amplitude = self.A(x[-1, :])
-            theta = self.theta(x[-1, :])
-
-            total_features.append(
-                torch.cat((position, sigmax, sigmay, amplitude, theta), dim=-1)
-            )
-
-        out = torch.stack(total_features, dim=0)
+        out = torch.cat((position, sigmax, sigmay, amplitude, theta), dim=-1)
 
         return out
 
@@ -380,7 +390,7 @@ for img_name in range(5):
 
     # Copy/grid for plotting
     prediction_copy = prediction.cpu().detach().numpy().copy()
-    x, y = np.meshgrid(np.arange(-100, 100, 1), np.arange(-100, 100, 1))
+    x, y = np.meshgrid(np.arange(-128, 128, 1), np.arange(-128, 128, 1))
 
     # Compare model prediction to data
     for j in range(7):
