@@ -128,127 +128,75 @@ class Focusing_Sequence(torch.nn.Module):
         super().__init__()
 
         self.image_conv = torch.nn.Sequential(
-            # Extract features from grayscale image.
-            # torch.nn.Conv2d(in_channels=1, out_channels=16, kernel_size=(5, 5)),
-            # torch.nn.BatchNorm2d(num_features=16),
-            # torch.nn.LeakyReLU(),
-            # torch.nn.Dropout2d(p=0.1),
-            # #torch.nn.MaxPool2d(kernel_size=(2, 2), stride=(2, 2)),
-            # #
-            # torch.nn.Conv2d(in_channels=16, out_channels=16, kernel_size=(5, 5)),
-            # torch.nn.BatchNorm2d(num_features=16),
-            # torch.nn.LeakyReLU(),
-            # torch.nn.Dropout2d(p=0.1),
-            # torch.nn.MaxPool2d(kernel_size=(2, 2), stride=(2, 2)),
-            # #
-            # torch.nn.Conv2d(in_channels=16, out_channels=32, kernel_size=(3, 3)),
-            # torch.nn.BatchNorm2d(num_features=32),
-            # torch.nn.LeakyReLU(),
-            # torch.nn.Dropout2d(p=0.1),
-            # #torch.nn.MaxPool2d(kernel_size=(2, 2), stride=(2, 2)),
-            # #
-            # torch.nn.Conv2d(in_channels=32, out_channels=32, kernel_size=(3, 3)),
-            # torch.nn.BatchNorm2d(num_features=32),
-            # torch.nn.LeakyReLU(),
-            # torch.nn.Dropout2d(p=0.1),
-            # torch.nn.AvgPool2d(2,2),
-            # torch.nn.MaxPool2d(kernel_size=(2, 2), stride=(2, 2)),
-            # torch.nn.Conv2d(in_channels=128, out_channels=128, kernel_size=(1, 1)),
-            # torch.nn.BatchNorm2d(num_features=128),
-            # torch.nn.LeakyReLU(),
-            # torch.nn.Dropout2d(p=0.1),
-            # torch.nn.MaxPool2d(kernel_size=(2, 2), stride=(2, 2)),
-            # #
             torch.nn.Conv2d(in_channels=1, out_channels=16, kernel_size=(5, 5)),
-            # torch.nn.BatchNorm2d(num_features=16),
+            torch.nn.BatchNorm2d(num_features=16),
             torch.nn.LeakyReLU(),
-            # torch.nn.Dropout2d(p=0.1),
             torch.nn.AvgPool2d(2, 2),
             #
             torch.nn.Conv2d(in_channels=16, out_channels=32, kernel_size=(3, 3)),
-            # torch.nn.BatchNorm2d(num_features=16),
+            torch.nn.BatchNorm2d(num_features=32),
             torch.nn.LeakyReLU(),
-            torch.nn.Dropout2d(p=0.3),
-            torch.nn.AvgPool2d(2, 2),
+            torch.nn.Dropout2d(p=0.2),
+            torch.nn.MaxPool2d(kernel_size=(2, 2), stride=(2, 2)),
             #
             torch.nn.Conv2d(in_channels=32, out_channels=64, kernel_size=(3, 3)),
-            # torch.nn.BatchNorm2d(num_features=32),
+            torch.nn.BatchNorm2d(num_features=64),
             torch.nn.LeakyReLU(),
-            torch.nn.Dropout2d(p=0.3),
+            torch.nn.Dropout2d(p=0.2),
             torch.nn.AvgPool2d(2, 2),
         )
 
-        self.flat = torch.nn.Sequential(
-            # Map features to smaller size for LSTM.
-            torch.nn.Flatten(),
-            # torch.nn.Linear(6400, 2048),
-            # torch.nn.Dropout(p=0.5),
-            # torch.nn.LayerNorm(2048),
-            # torch.nn.LeakyReLU(),
+        hidden_size = int((2 / 3 * 33856) + 44)
+        self.sequence = torch.nn.LSTM(
+            input_size=33856,
+            hidden_size=hidden_size,
+            num_layers=1,
+            batch_first=True,
+            dropout=0.4,
+            bidirectional=False,
         )
 
-        # self.lin = torch.nn.Sequential(
-        #     torch.nn.Linear(6,6),
-        #     torch.nn.LayerNorm(6),
-        # )
+        self.LSTM_out = (torch.nn.LayerNorm(hidden_size),)
+
+        self.flat = torch.nn.Sequential(
+            torch.nn.Flatten(),
+        )
 
         self.pos = torch.nn.Sequential(
-            torch.nn.Linear(33856, 2),
+            torch.nn.Linear(hidden_size, 2),
             torch.nn.LeakyReLU(),
         )
         self.sigmax = torch.nn.Sequential(
-            torch.nn.Linear(33856, 1),
+            torch.nn.Linear(hidden_size, 1),
             torch.nn.LeakyReLU(),
         )
         self.sigmay = torch.nn.Sequential(
-            torch.nn.Linear(33856, 1),
+            torch.nn.Linear(hidden_size, 1),
             torch.nn.LeakyReLU(),
         )
         self.A = torch.nn.Sequential(
-            torch.nn.Linear(33856, 1),
+            torch.nn.Linear(hidden_size, 1),
             torch.nn.LeakyReLU(),
         )
         self.theta = torch.nn.Sequential(
-            torch.nn.Linear(33856, 1),
+            torch.nn.Linear(hidden_size, 1),
             torch.nn.LeakyReLU(),
         )
 
-        # self.sequence = torch.nn.LSTM(
-        #     input_size=6406,
-        #     hidden_size=int((2 / 3 * 6406) + 44),
-        #     num_layers=3,
-        #     batch_first=True,
-        #     dropout=0.4,
-        #     bidirectional=False,
-        # )
-
-        # self.LSTM_out = (torch.nn.LayerNorm(int((2 / 3 * 6406) + 44)),)
-
-        # # Map LSTM hidden layer to channels.
-        # self.fully_connected = torch.nn.Sequential(
-        #     #torch.nn.Linear(1409, 7),
-        #     torch.nn.Linear(76838, 6),
-        #     torch.nn.Dropout(p=0.2),
-        #     torch.nn.LayerNorm(6),
-        #     torch.nn.LeakyReLU(),
-        # )
-
     def forward(self, image, volts_out):
         batch_size, sequence_length = image.shape[:2]
-        # image_features = []
         total_features = []
-        # print(image.size())
 
         # Process each batch of images from the input.
         for t in range(batch_size):
             image_batch = image[t, :]
-            # print(image_batch.size())
+
             # Extract image features from each batch.
             x = self.image_conv(image_batch)
             # print(x.size())
             x = self.flat(x)
-            # print(x.size())
-            # image_features.append(self.flat(x))
+
+            x = self.sequence(x)
 
             position = self.pos(x[-1, :])
             sigmax = self.sigmax(x[-1, :])
@@ -260,29 +208,7 @@ class Focusing_Sequence(torch.nn.Module):
                 torch.cat((position, sigmax, sigmay, amplitude, theta), dim=-1)
             )
 
-        # image_features = torch.stack(image_features, dim=0)
-        tmp = torch.stack(total_features, dim=0)
-        # print(tmp.size())
-        out = tmp
-
-        # position = self.pos(image_features[:, -1, :])
-        # sigmax = self.sigmax(image_features[:, -1, :])
-        # sigmay = self.sigmay(image_features[:, -1, :])
-        # amplitude = self.A(image_features[:, -1, :])
-        # theta = self.theta(image_features[:, -1, :])
-
-        # volts_out = self.lin(volts_out)
-
-        # image_features = torch.cat((image_features, volts_out), dim=-1)
-        # out = torch.cat((position, sigmax, sigmay, amplitude, theta), dim=-1)
-
-        # Extract time features
-        # LSTM_out, h_n = self.sequence(image_features)
-
-        # Take prediction from final image in batch.
-        # Potentially losing  important temporal infromation here.
-        # out = self.fully_connected(LSTM_out[:, -1, :])
-        # out = self.fully_connected(image_features[:, -1, :])
+        out = torch.stack(total_features, dim=0)
 
         return out
 
@@ -436,14 +362,19 @@ for img_name in range(5):
     print("=" * 20)
     print(f"x0: {prediction[:, 0].cpu().detach().numpy()}")
     print(f"x0_real: {next_volt[:, 0]}")
+    print()
     print(f"y0: {prediction[:, 1].cpu().detach().numpy()}")
     print(f"y0_real: {next_volt[:, 1]}")
+    print()
     print(f"sigma_x: {prediction[:, 2].cpu().detach().numpy()}")
     print(f"sigma_x_real: {next_volt[:, 2]}")
+    print()
     print(f"sigma_y: {prediction[:, 3].cpu().detach().numpy()}")
     print(f"sigma_y_real: {next_volt[:, 3]}")
+    print()
     print(f"A: {prediction[:, 4].cpu().detach().numpy()}")
     print(f"A_real: {next_volt[:, 4]}")
+    print()
     print(f"theta: {prediction[:, 5].cpu().detach().numpy()}")
     print(f"theta_real: {next_volt[:, 5]}")
 
