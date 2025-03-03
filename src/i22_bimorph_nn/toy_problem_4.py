@@ -157,14 +157,21 @@ class Focusing_Sequence(torch.nn.Module):
             torch.nn.BatchNorm2d(num_features=128),
             torch.nn.LeakyReLU(),
             torch.nn.Dropout2d(p=0.2),
+            #
+            torch.nn.Conv2d(
+                in_channels=128, out_channels=256, kernel_size=(3, 3), padding=1
+            ),
+            torch.nn.BatchNorm2d(num_features=256),
+            torch.nn.LeakyReLU(),
+            torch.nn.Dropout2d(p=0.2),
             # Collape to number of features by discarding pixel leftovers.
             torch.nn.AdaptiveAvgPool2d((1, 1)),
         )
 
-        hidden_size = int((2 / 3 * 128) + 44)
+        hidden_size = int((2 / 3 * 256) + 44)
         self.sequence = torch.nn.LSTM(
             # Learn temporal component of values.
-            input_size=128,
+            input_size=256,
             hidden_size=hidden_size,
             num_layers=2,
             batch_first=True,
@@ -231,6 +238,12 @@ def init_weights(m):
         )
         if m.bias is not None:
             torch.nn.init.zeros_(m.bias)
+    if isinstance(m, torch.nn.LSTM):
+        for name, param in m.named_parameters():
+            if "weight" in name:
+                torch.nn.init.xavier_normal_(param)
+            elif "bias" in name:
+                torch.nn.init.zeros_(param)
 
 
 # Generate consistent seeds
@@ -255,7 +268,7 @@ if torch.cuda.is_available():
 criterion = torch.nn.HuberLoss()
 optimizer = torch.optim.Adam(model.parameters(), lr=2e-4)
 
-epochs = 300
+epochs = 100
 data_size = 10
 
 losses = []
