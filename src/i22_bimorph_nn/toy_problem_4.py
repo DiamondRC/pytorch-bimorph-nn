@@ -169,17 +169,24 @@ class Focusing_Sequence(torch.nn.Module):
         )
 
         hidden_size = int((2 / 3 * 256) + 44)
-        self.sequence = torch.nn.LSTM(
-            # Learn temporal component of values.
+        # self.sequence = torch.nn.LSTM(
+        #     # Learn temporal component of values.
+        #     input_size=256,
+        #     hidden_size=hidden_size,
+        #     num_layers=3,
+        #     batch_first=True,
+        #     dropout=0.3,
+        #     bidirectional=False,
+        # )
+
+        self.sequence = torch.nn.GRU(
             input_size=256,
             hidden_size=hidden_size,
             num_layers=2,
             batch_first=True,
-            dropout=0.3,
-            bidirectional=False,
         )
 
-        self.LSTM_out_norm = (torch.nn.LayerNorm(hidden_size),)
+        self.LSTM_out_norm = torch.nn.LayerNorm(hidden_size)
 
         self.flat = torch.nn.Sequential(
             torch.nn.Flatten(),
@@ -216,7 +223,7 @@ class Focusing_Sequence(torch.nn.Module):
             features.append(self.flat(self.image_conv(image_batch)))
         image_features = torch.stack(features, dim=0)
         # Process features through LSTM
-        LSTM_out, _ = self.sequence(image_features)
+        LSTM_out = self.LSTM_out_norm(self.sequence(image_features)[0])
 
         # Determine params with seperate linear transforms.
         position = self.pos(LSTM_out[:, -1])
