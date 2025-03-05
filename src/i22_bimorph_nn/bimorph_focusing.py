@@ -3,17 +3,22 @@
 #######################################################################
 
 import os
-import random
 from pathlib import Path
 
 import h5py
 import matplotlib.pyplot as plt
 import numpy as np
 import torch
-from torch import Tensor
+from torch import tensor
 from torch.autograd import Variable
+from torchvision import transforms
 
 os.system("clear")
+
+if torch.cuda.is_available():
+    dev = "cuda:0"
+else:
+    dev = "cpu"
 
 
 ################################
@@ -69,111 +74,110 @@ class Bimorph_Focusing(torch.nn.Module):
         # Extract beam features from the detector with a 2D Convolutional Network.
         self.image_conv = torch.nn.Sequential(
             torch.nn.Conv2d(
-                in_channels=1, out_channels=32, kernel_size=(5, 5), stride=2, padding=1
+                in_channels=1, out_channels=16, kernel_size=(5, 5), padding=2
             ),
-            torch.nn.ReLU(),
-            torch.nn.MaxPool2d(kernel_size=(2, 2), stride=(2, 2)),
-            torch.nn.Conv2d(
-                in_channels=32, out_channels=64, kernel_size=(5, 5), stride=1
-            ),
-            torch.nn.ReLU(),
-            torch.nn.MaxPool2d(kernel_size=(2, 2), stride=(2, 2)),
-            torch.nn.Conv2d(
-                in_channels=64, out_channels=128, kernel_size=(3, 3), stride=1
-            ),
-            torch.nn.ReLU(),
-            torch.nn.MaxPool2d(kernel_size=(2, 2), stride=(2, 2)),
-            torch.nn.Conv2d(
-                in_channels=128, out_channels=128, kernel_size=(3, 3), stride=1
-            ),
-            torch.nn.ReLU(),
-            torch.nn.MaxPool2d(kernel_size=(2, 2), stride=(2, 2)),
-            torch.nn.Flatten(),
-            torch.nn.Linear(128 * 74 * 62, 128),
-            torch.nn.ReLU(),
+            torch.nn.BatchNorm2d(num_features=16),
+            torch.nn.LeakyReLU(),
+            torch.nn.AvgPool2d(2, 2),
+            #
+            # torch.nn.Conv2d(
+            #     in_channels=16, out_channels=32, kernel_size=(3, 3), padding=1
+            # ),
+            # torch.nn.BatchNorm2d(num_features=32),
+            # torch.nn.LeakyReLU(),
+            # torch.nn.Dropout2d(p=0.2),
+            # torch.nn.AvgPool2d(2, 2),
+            #
+            # torch.nn.Conv2d(
+            #     in_channels=32, out_channels=64, kernel_size=(3, 3), padding=1
+            # ),
+            # torch.nn.BatchNorm2d(num_features=64),
+            # torch.nn.LeakyReLU(),
+            # torch.nn.Dropout2d(p=0.2),
+            # torch.nn.AvgPool2d(2, 2),
+            # #
+            # torch.nn.Conv2d(
+            #     in_channels=64, out_channels=128, kernel_size=(3, 3), padding=1
+            # ),
+            # torch.nn.BatchNorm2d(num_features=128),
+            # torch.nn.LeakyReLU(),
+            # torch.nn.Dropout2d(p=0.2),
+            # torch.nn.AvgPool2d(2, 2),
+            # #
+            # torch.nn.Conv2d(
+            #     in_channels=128, out_channels=256, kernel_size=(3, 3), padding=1
+            # ),
+            # torch.nn.BatchNorm2d(num_features=256),
+            # torch.nn.LeakyReLU(),
+            # torch.nn.Dropout2d(p=0.2),
+            # torch.nn.AdaptiveAvgPool2d((1, 1)),
         )
 
-        # Linearly transform the channel voltages.
-        self.volt_linear = torch.nn.Sequential(
-            torch.nn.Linear(in_features=44, out_features=128),
-            torch.nn.ReLU(),
-        )
+        # # Linearly transform the channel voltages.
+        # self.volt_linear = torch.nn.Sequential(
+        #     torch.nn.Linear(in_features=44, out_features=128),
+        #     torch.nn.ReLU(),
+        # )
 
-        # Want to encode temporal information of the sequence to give 'next step'.
-        self.sequence = torch.nn.LSTM(
-            input_size=256,
-            # Using 2/3*input layer + output layer as a baseline,
-            # this hyperparameter should be optimised though!
-            hidden_size=int((2 / 3 * 256) + 44),
-            num_layers=1,
-            batch_first=True,
-        )
+        # # Want to encode temporal information of the sequence to give 'next step'.
+        # self.sequence = torch.nn.LSTM(
+        #     input_size=256,
+        #     hidden_size=int((2 / 3 * 256) + 44),
+        #     num_layers=1,
+        #     batch_first=True,
+        # )
 
-        # Fully connected layer for final prediction
-        self.fully_connected = torch.nn.Linear(int((2 / 3 * 256) + 44), 44)
-
-        # # Normalises data for faster convergence
-        # self.batch1 = torch.nn.BatchNorm2d(num_features=32)
-        # self.batch2 = torch.nn.BatchNorm2d(num_features=64)
-        # self.batch3 = torch.nn.BatchNorm2d(num_features=128)
-        # self.batch4 = torch.nn.BatchNorm2d(num_features=128)
-
-        # # Improve model flexability and bias
-        # self.dropout = torch.nn.Dropout2d(p=0.15)
+        # self.fully_connected = torch.nn.Linear(128, 44)
 
     def forward(self, images, voltages):
         batch_size, sequence_length = images.shape[:2]
 
         # Process images and voltages at each timestep
         image_features = []
-        volt_features = []
         for t in range(sequence_length):
             image_batch = images[:, t]
-            volt_batch = voltages[:, t]
 
             image_features.append(self.image_conv(image_batch))
-            volt_features.append(self.volt_linear(volt_batch))
 
         image_features = torch.stack(image_features, dim=1)
-        volt_features = torch.stack(volt_features, dim=1)
 
-        # print(image_features.size())
-        # print(volt_features.size())
-
-        combined_features = torch.cat((image_features, volt_features), dim=-1)
-        # print(combined_features.size())
-
-        LSTM_out, _ = self.sequence(combined_features)
-        # print(LSTM_out.size())
-
-        out = self.fully_connected(LSTM_out[:, -1])
-        # print(out.size())
-
-        # plt.imshow(
-        #     images.detach().numpy()[0,0,0],
-        #     cmap="hot",
-        #     interpolation="nearest",
-        # )
-        # plt.show()
-
-        # plt.imshow(
-        #     image_features.detach().numpy()[0,0,0],
-        #     cmap="hot",
-        #     interpolation="nearest",
-        # )
-        # plt.show()
+        out = self.fully_connected(image_features[:, -1])
 
         return out
 
 
-model = Bimorph_Focusing()
+# Pre-set weights in all model layers.
+def init_weights(m):
+    if isinstance(m, torch.nn.Conv2d) or isinstance(m, torch.nn.Linear):
+        torch.nn.init.kaiming_normal_(
+            m.weight, mode="fan_in", nonlinearity="leaky_relu"
+        )
+        if m.bias is not None:
+            torch.nn.init.zeros_(m.bias)
+    if isinstance(m, torch.nn.GRU):
+        for name, param in m.named_parameters():
+            if "weight" in name:
+                torch.nn.init.xavier_normal_(param)
+            elif "bias" in name:
+                torch.nn.init.zeros_(param)
+
 
 # Define loss, optimiser and run parameters.
-critereon = torch.nn.MSELoss(reduction="mean")
+model = Bimorph_Focusing()
+model.apply(init_weights)
+
+if torch.cuda.is_available():
+    model.to("cuda")
+
+# Define loss, optimiser and run parameters.
+criterion = torch.nn.HuberLoss()
+optimizer = torch.optim.Adam(model.parameters(), lr=1e-4)
 optimizer = torch.optim.AdamW(model.parameters(), lr=1e-3)
 
 data_size = 10
 losses = []
+layers = []
+grads = []
 
 
 ################################
@@ -198,95 +202,88 @@ for file in os.listdir(dir):
                     if file_hash % 5 != 0:
                         print(f"Training set: {file_path.name}")
                         print(f"Training set: {file_path.name[:-4]}-ss.hf5")
-                        volt_out, image_out, params_out = get_data_from_run(
+                        volt_out, images_out, params_out = get_data_from_run(
                             dir, file_path.name[:-4], detector
                         )
 
-                        optimizer.zero_grad()
-
-                        slice = random.randrange(0, 11)
-                        # image_crop = image_out[slice:slice + 3, :, :, :]
-
-                        img_test = np.array(
-                            [image_out[i : i + 3] for i in range(len(image_out) - 3)]
-                        )
-                        volt_test = np.array(
-                            [volt_out[i : i + 3] for i in range(len(volt_out) - 3)]
-                        )
-                        img_next = np.array(
-                            [image_out[i + 3] for i in range(len(image_out) - 3)]
-                        )
-                        volt_next = np.array(
-                            [volt_out[i + 3] for i in range(len(volt_out) - 3)]
-                        )
-                        # print(np.shape(img_test))
-                        # print(np.shape(volt_test))
-                        # print(np.shape(img_next))
-                        # print(np.shape(volt_next))
-                        # print(volt_test[1][-1] == volt_next[0])
-                        # print(img_test[1][-1] == img_next[0])
-
-                        image_crop = np.reshape(
-                            image_out,
-                            (
-                                data_set_size // images_per_sequence,
-                                images_per_sequence,
-                                1,
-                                *detector_res,
-                            ),
-                        )
-                        image_next = image_out[slice + 3, :, :, :]
-                        # volt_crop = volt_out[slice : slice + 3, :]
-                        volt_crop = np.reshape(
-                            volt_out,
-                            (
-                                data_set_size // images_per_sequence,
-                                images_per_sequence,
-                                vfm_channels + hfm_channels,
-                            ),
+                        next_images_out = np.float32(
+                            np.array(
+                                [images_out[i + 3] for i in range(len(images_out) - 3)]
+                            )
                         )
 
-                        # plt.imshow(
-                        #     image_out[11,0],
-                        #     cmap="hot",
-                        #     interpolation="nearest",
-                        # )
-                        # plt.show()
+                        # Sliding window sequence into batches of three images.
+                        images_out = np.float32(
+                            np.array(
+                                [
+                                    images_out[i : i + 3]
+                                    for i in range(len(images_out) - 3)
+                                ]
+                            )
+                        )
 
-                        # plt.imshow(
-                        #     image_crop[3,2,0],
-                        #     cmap="hot",
-                        #     interpolation="nearest",
-                        # )
-                        # plt.show()
+                        # 'next step' for each image batch.
+                        next_volt = np.float32(
+                            np.array(
+                                [volt_out[i + 3] for i in range(len(volt_out) - 3)]
+                            )
+                        )
 
-                        voltages = Variable(Tensor(volt_test))
-                        images = Variable(Tensor(img_test))
-                        next_channels = Variable(Tensor(volt_next))
+                        # Channel information at each step.
+                        volts_out = np.float32(
+                            np.array(
+                                [volt_out[i : i + 3] for i in range(len(volt_out) - 3)]
+                            )
+                        )
+
+                        image = Variable(tensor(images_out.copy(), device="cuda"))
+                        next_volt = Variable(tensor(next_volt.copy(), device="cuda"))
+                        volts_out = Variable(tensor(volts_out.copy(), device="cuda"))
+
+                        # Normalise the images and 'voltages'.
+                        norm_img = transforms.Normalize(
+                            mean=torch.mean(image), std=torch.std(image)
+                        )
+
+                        row_mean = next_volt.mean(dim=1, keepdim=True)
+                        row_std = next_volt.std(dim=1, keepdim=True)
+                        norm_next_volt = (next_volt - row_mean) / row_std
+
+                        row_mean2 = volts_out.mean(dim=1, keepdim=True)
+                        row_std2 = volts_out.std(dim=1, keepdim=True)
+                        norm_volts_out = (volts_out - row_mean2) / (row_std2 + 1e-10)
+
+                        norm_images_out = norm_img(image)
+
                         epoch_loss = 0
 
-                        # print(images.size())
+                        model_pred = model(norm_images_out, norm_volts_out)
 
-                        model_pred = model(images, voltages)
                         # Do something with the model prediction to generate the image
                         ...
 
-                        # print(f"model_pred: {model_pred[1]}")
-                        # print(f"Actual: {next_channels[1]}")
-                        print(f"Diff: {model_pred[1] - next_channels[1]}")
-
                         # Calculate loss, backpropagate etc
-                        loss = critereon(model_pred, next_channels)
+                        loss = criterion(model_pred, norm_next_volt)
 
                         loss.backward()
+                        torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
                         optimizer.step()
                         epoch_loss = loss.data
-
                         epochs += 1
-                        losses.append(loss.detach().numpy())
+
+                        # Collect loss on CPU for plotting.
+                        losses.append(loss.cpu().detach().numpy())
 
                         if epoch % 1 == 0:
                             print(f"Epoch: {epoch} Loss: {epoch_loss}")
+
+                        if epochs == 0 or epochs % 5 == 0:
+                            for name, param in model.named_parameters():
+                                if "weight" in name:  # Only consider weight parameters
+                                    layers.append(name)
+                                    # Compute L2 norm (Frobenius norm) of the weights
+                                    grad = torch.norm(param, p=2).item()
+                                    grads.append(grad)
 
             except KeyError:
                 pass
@@ -296,7 +293,29 @@ for file in os.listdir(dir):
 # Testing
 ################################
 
+for name, param in model.named_parameters():
+    if param.grad is not None:
+        plt.figure(figsize=(6, 4))
+        plt.hist(
+            param.grad.view(-1).detach().numpy(), bins=200, alpha=0.7, color="blue"
+        )
+        plt.title(f"Gradient Histogram for {name}")
+        plt.xlabel("Gradient Value")
+        plt.ylabel("Frequency")
+        plt.grid(True)
+        plt.show()
+
 plt.plot(range(epochs), losses)
 plt.ylabel("Loss")
 plt.xlabel("epoch")
+plt.show()
+
+plt.figure(figsize=(8, 6))
+plt.bar(layers, grads, color="skyblue")
+plt.title("Weight Magnitudes (L2 Norm) for Each Layer")
+plt.xlabel("Layer")
+plt.ylabel("Weight Magnitude (L2 Norm)")
+plt.xticks(rotation=45, ha="right")
+plt.grid(axis="y", linestyle="--", alpha=0.7)
+plt.tight_layout()
 plt.show()
