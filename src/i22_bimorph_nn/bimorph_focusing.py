@@ -103,6 +103,27 @@ class Bimorph_Focusing(torch.nn.Module):
             torch.nn.LeakyReLU(),
             torch.nn.Dropout2d(p=0.2),
             # torch.nn.AvgPool2d(2, 2),
+            #
+            torch.nn.Conv2d(
+                in_channels=128, out_channels=256, kernel_size=(3, 3), padding=1
+            ),
+            torch.nn.BatchNorm2d(num_features=256),
+            torch.nn.LeakyReLU(),
+            torch.nn.Dropout2d(p=0.2),
+            #
+            torch.nn.Conv2d(
+                in_channels=256, out_channels=512, kernel_size=(3, 3), padding=1
+            ),
+            torch.nn.BatchNorm2d(num_features=512),
+            torch.nn.LeakyReLU(),
+            torch.nn.Dropout2d(p=0.2),
+            #
+            torch.nn.Conv2d(
+                in_channels=512, out_channels=1024, kernel_size=(3, 3), padding=1
+            ),
+            torch.nn.BatchNorm2d(num_features=1024),
+            torch.nn.LeakyReLU(),
+            torch.nn.Dropout2d(p=0.2),
             torch.nn.AdaptiveAvgPool2d((1, 1)),
         )
 
@@ -110,15 +131,20 @@ class Bimorph_Focusing(torch.nn.Module):
             torch.nn.Flatten(),
         )
 
-        hidden_size = 2 * int((2 / 3 * 128) + 44)
+        hidden_size = 2 * int((2 / 3 * 1024) + 44)
         self.sequence = torch.nn.GRU(
-            input_size=128,
+            input_size=1024,
             hidden_size=hidden_size,
             num_layers=2,
             batch_first=True,
         )
 
-        self.fully_connected = torch.nn.Linear(hidden_size, 44)
+        self.attention = torch.nn.MultiheadAttention(
+            embed_dim=1024, num_heads=16, batch_first=False
+        )
+
+        # self.fully_connected = torch.nn.Linear(hidden_size, 44)
+        self.fully_connected = torch.nn.Linear(1024, 44)
 
     def forward(self, images, voltages):
         batch_size, sequence_length = images.shape[:2]
@@ -133,9 +159,13 @@ class Bimorph_Focusing(torch.nn.Module):
 
         image_features = torch.stack(image_features, dim=0)
 
-        LSTM_out, _ = self.sequence(image_features)
+        # LSTM_out, _ = self.sequence(image_features)
 
-        out = self.fully_connected(LSTM_out[:, -1, :])
+        # out = self.fully_connected(LSTM_out[:, -1, :])
+
+        atten_out, _ = self.attention(image_features, image_features, image_features)
+
+        out = self.fully_connected(atten_out[:, -1, :])
 
         return out
 
@@ -164,9 +194,8 @@ if torch.cuda.is_available():
     model.to("cuda")
 
 # Define loss, optimiser and run parameters.
-criterion = torch.nn.HuberLoss()
-optimizer = torch.optim.Adam(model.parameters(), lr=1e-4)
-optimizer = torch.optim.AdamW(model.parameters(), lr=1e-3)
+criterion = torch.nn.MSELoss()
+optimizer = torch.optim.AdamW(model.parameters(), lr=1e-4)
 
 data_size = 10
 losses = []
