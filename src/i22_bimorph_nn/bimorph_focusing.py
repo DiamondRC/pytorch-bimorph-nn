@@ -73,6 +73,7 @@ class Bimorph_Focusing(torch.nn.Module):
 
         # Extract beam features from the detector with a 2D Convolutional Network.
         self.image_conv = torch.nn.Sequential(
+            torch.nn.AvgPool2d(2, 2),
             torch.nn.Conv2d(
                 in_channels=1, out_channels=16, kernel_size=(5, 5), padding=2
             ),
@@ -80,68 +81,61 @@ class Bimorph_Focusing(torch.nn.Module):
             torch.nn.LeakyReLU(),
             torch.nn.AvgPool2d(2, 2),
             #
-            # torch.nn.Conv2d(
-            #     in_channels=16, out_channels=32, kernel_size=(3, 3), padding=1
-            # ),
-            # torch.nn.BatchNorm2d(num_features=32),
-            # torch.nn.LeakyReLU(),
-            # torch.nn.Dropout2d(p=0.2),
+            torch.nn.Conv2d(
+                in_channels=16, out_channels=32, kernel_size=(3, 3), padding=1
+            ),
+            torch.nn.BatchNorm2d(num_features=32),
+            torch.nn.LeakyReLU(),
+            torch.nn.Dropout2d(p=0.2),
+            torch.nn.AvgPool2d(2, 2),
+            torch.nn.Conv2d(
+                in_channels=32, out_channels=64, kernel_size=(3, 3), padding=1
+            ),
+            torch.nn.BatchNorm2d(num_features=64),
+            torch.nn.LeakyReLU(),
+            torch.nn.Dropout2d(p=0.2),
             # torch.nn.AvgPool2d(2, 2),
             #
-            # torch.nn.Conv2d(
-            #     in_channels=32, out_channels=64, kernel_size=(3, 3), padding=1
-            # ),
-            # torch.nn.BatchNorm2d(num_features=64),
-            # torch.nn.LeakyReLU(),
-            # torch.nn.Dropout2d(p=0.2),
+            torch.nn.Conv2d(
+                in_channels=64, out_channels=128, kernel_size=(3, 3), padding=1
+            ),
+            torch.nn.BatchNorm2d(num_features=128),
+            torch.nn.LeakyReLU(),
+            torch.nn.Dropout2d(p=0.2),
             # torch.nn.AvgPool2d(2, 2),
-            # #
-            # torch.nn.Conv2d(
-            #     in_channels=64, out_channels=128, kernel_size=(3, 3), padding=1
-            # ),
-            # torch.nn.BatchNorm2d(num_features=128),
-            # torch.nn.LeakyReLU(),
-            # torch.nn.Dropout2d(p=0.2),
-            # torch.nn.AvgPool2d(2, 2),
-            # #
-            # torch.nn.Conv2d(
-            #     in_channels=128, out_channels=256, kernel_size=(3, 3), padding=1
-            # ),
-            # torch.nn.BatchNorm2d(num_features=256),
-            # torch.nn.LeakyReLU(),
-            # torch.nn.Dropout2d(p=0.2),
-            # torch.nn.AdaptiveAvgPool2d((1, 1)),
+            torch.nn.AdaptiveAvgPool2d((1, 1)),
         )
 
-        # # Linearly transform the channel voltages.
-        # self.volt_linear = torch.nn.Sequential(
-        #     torch.nn.Linear(in_features=44, out_features=128),
-        #     torch.nn.ReLU(),
-        # )
+        self.flat = torch.nn.Sequential(
+            torch.nn.Flatten(),
+        )
 
-        # # Want to encode temporal information of the sequence to give 'next step'.
-        # self.sequence = torch.nn.LSTM(
-        #     input_size=256,
-        #     hidden_size=int((2 / 3 * 256) + 44),
-        #     num_layers=1,
-        #     batch_first=True,
-        # )
+        hidden_size = 2 * int((2 / 3 * 128) + 44)
+        self.sequence = torch.nn.GRU(
+            input_size=128,
+            hidden_size=hidden_size,
+            num_layers=2,
+            batch_first=True,
+        )
 
-        # self.fully_connected = torch.nn.Linear(128, 44)
+        self.fully_connected = torch.nn.Linear(hidden_size, 44)
 
     def forward(self, images, voltages):
         batch_size, sequence_length = images.shape[:2]
 
         # Process images and voltages at each timestep
         image_features = []
-        for t in range(sequence_length):
-            image_batch = images[:, t]
+        for t in range(batch_size):
+            image_batch = images[t, :]
+            x = self.flat(self.image_conv(image_batch))
 
-            image_features.append(self.image_conv(image_batch))
+            image_features.append(x)
 
-        image_features = torch.stack(image_features, dim=1)
+        image_features = torch.stack(image_features, dim=0)
 
-        out = self.fully_connected(image_features[:, -1])
+        LSTM_out, _ = self.sequence(image_features)
+
+        out = self.fully_connected(LSTM_out[:, -1, :])
 
         return out
 
@@ -198,6 +192,7 @@ for file in os.listdir(dir):
                     file_path = Path(file)
                     file_path.name.split(".")[0]
                     file_hash = hash(f)
+
                     # 80% testing split
                     if file_hash % 5 != 0:
                         print(f"Training set: {file_path.name}")
@@ -205,6 +200,9 @@ for file in os.listdir(dir):
                         volt_out, images_out, params_out = get_data_from_run(
                             dir, file_path.name[:-4], detector
                         )
+
+                        # Crop for lower VRAM usage
+                        images_out = images_out[:, :, 616:1848, 514:1542]
 
                         next_images_out = np.float32(
                             np.array(
@@ -297,17 +295,22 @@ for name, param in model.named_parameters():
     if param.grad is not None:
         plt.figure(figsize=(6, 4))
         plt.hist(
-            param.grad.view(-1).detach().numpy(), bins=200, alpha=0.7, color="blue"
+            param.grad.view(-1).cpu().detach().numpy(),
+            bins=200,
+            alpha=0.7,
+            color="blue",
         )
         plt.title(f"Gradient Histogram for {name}")
         plt.xlabel("Gradient Value")
         plt.ylabel("Frequency")
         plt.grid(True)
+        plt.savefig(f"bimorph/{name}.png")
         plt.show()
 
 plt.plot(range(epochs), losses)
 plt.ylabel("Loss")
 plt.xlabel("epoch")
+plt.savefig("bimorph/losses.png")
 plt.show()
 
 plt.figure(figsize=(8, 6))
@@ -318,4 +321,5 @@ plt.ylabel("Weight Magnitude (L2 Norm)")
 plt.xticks(rotation=45, ha="right")
 plt.grid(axis="y", linestyle="--", alpha=0.7)
 plt.tight_layout()
+plt.savefig("bimorph/layer_weight.png")
 plt.show()
