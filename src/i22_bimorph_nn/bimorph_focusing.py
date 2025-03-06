@@ -13,8 +13,6 @@ from torch import tensor
 from torch.autograd import Variable
 from torchvision import transforms
 
-os.environ["CUDA_LAUNCH_BLOCKING"] = "1"
-
 os.system("clear")
 
 if torch.cuda.is_available():
