@@ -13,6 +13,8 @@ from torch import tensor
 from torch.autograd import Variable
 from torchvision import transforms
 
+os.environ["CUDA_LAUNCH_BLOCKING"] = "1"
+
 os.system("clear")
 
 if torch.cuda.is_available():
@@ -94,7 +96,23 @@ class Bimorph_Focusing(torch.nn.Module):
             torch.nn.BatchNorm2d(num_features=64),
             torch.nn.LeakyReLU(),
             torch.nn.Dropout2d(p=0.2),
-            # torch.nn.AvgPool2d(2, 2),
+            torch.nn.AvgPool2d(2, 2),
+            #
+            torch.nn.Conv2d(
+                in_channels=64, out_channels=64, kernel_size=(3, 3), padding=1
+            ),
+            torch.nn.BatchNorm2d(num_features=64),
+            torch.nn.LeakyReLU(),
+            torch.nn.Dropout2d(p=0.2),
+            torch.nn.AvgPool2d(2, 2),
+            #
+            torch.nn.Conv2d(
+                in_channels=64, out_channels=64, kernel_size=(3, 3), padding=1
+            ),
+            torch.nn.BatchNorm2d(num_features=64),
+            torch.nn.LeakyReLU(),
+            torch.nn.Dropout2d(p=0.2),
+            torch.nn.AvgPool2d(2, 2),
             #
             torch.nn.Conv2d(
                 in_channels=64, out_channels=128, kernel_size=(3, 3), padding=1
@@ -102,29 +120,16 @@ class Bimorph_Focusing(torch.nn.Module):
             torch.nn.BatchNorm2d(num_features=128),
             torch.nn.LeakyReLU(),
             torch.nn.Dropout2d(p=0.2),
-            # torch.nn.AvgPool2d(2, 2),
             #
             torch.nn.Conv2d(
-                in_channels=128, out_channels=256, kernel_size=(3, 3), padding=1
+                in_channels=128, out_channels=128, kernel_size=(3, 3), padding=1
             ),
-            torch.nn.BatchNorm2d(num_features=256),
+            torch.nn.BatchNorm2d(num_features=128),
             torch.nn.LeakyReLU(),
             torch.nn.Dropout2d(p=0.2),
+            torch.nn.AvgPool2d(2, 2),
             #
-            torch.nn.Conv2d(
-                in_channels=256, out_channels=512, kernel_size=(3, 3), padding=1
-            ),
-            torch.nn.BatchNorm2d(num_features=512),
-            torch.nn.LeakyReLU(),
-            torch.nn.Dropout2d(p=0.2),
-            #
-            torch.nn.Conv2d(
-                in_channels=512, out_channels=1024, kernel_size=(3, 3), padding=1
-            ),
-            torch.nn.BatchNorm2d(num_features=1024),
-            torch.nn.LeakyReLU(),
-            torch.nn.Dropout2d(p=0.2),
-            torch.nn.AdaptiveAvgPool2d((1, 1)),
+            # torch.nn.AdaptiveAvgPool2d((1, 1)),
         )
 
         self.flat = torch.nn.Sequential(
@@ -140,11 +145,11 @@ class Bimorph_Focusing(torch.nn.Module):
         )
 
         self.attention = torch.nn.MultiheadAttention(
-            embed_dim=1024, num_heads=16, batch_first=False
+            embed_dim=8192, num_heads=32, batch_first=False
         )
 
         # self.fully_connected = torch.nn.Linear(hidden_size, 44)
-        self.fully_connected = torch.nn.Linear(1024, 44)
+        self.fully_connected = torch.nn.Linear(8192, 44)
 
     def forward(self, images, voltages):
         batch_size, sequence_length = images.shape[:2]
@@ -153,7 +158,8 @@ class Bimorph_Focusing(torch.nn.Module):
         image_features = []
         for t in range(batch_size):
             image_batch = images[t, :]
-            x = self.flat(self.image_conv(image_batch))
+            x = self.image_conv(image_batch)
+            x = self.flat(x)
 
             image_features.append(x)
 
@@ -231,7 +237,7 @@ for file in os.listdir(dir):
                         )
 
                         # Crop for lower VRAM usage
-                        images_out = images_out[:, :, 616:1848, 514:1542]
+                        images_out = images_out[:, :, 514:1542, 514:1542]
 
                         next_images_out = np.float32(
                             np.array(
