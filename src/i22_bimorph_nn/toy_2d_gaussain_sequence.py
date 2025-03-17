@@ -2,10 +2,10 @@
 # Predict next image parameters in 2D Gaussian Sequence
 #######################################################################
 
-import math
 import os
 import random
 
+import h5py
 import matplotlib.pyplot as plt
 import torch
 import torch.share
@@ -19,18 +19,20 @@ else:
     dev = "cpu"
 
 
-class GaussianDataset(Dataset):
-    def __init__(self, DATA_SIZE, range_min=5, range_max=7, mean=3, std=1):
-        self.x = (range_max - range_min) * torch.rand(DATA_SIZE) + range_min
-        self.y = (1 / math.sqrt(2 * std**2)) * torch.exp(
-            -((self.x - mean) ** 2) / 2 * std**2
-        )
+class GaussianHDF5Dataset(Dataset):
+    def __init__(self):
+        self.file_path = PATH
+        with h5py.File(self.file_path, "r") as f:
+            self.data_len = len(f["image_dataset"])
 
     def __len__(self):
-        return len(self.x)
+        return len(self.data_len)
 
     def __getitem__(self, idx):
-        return self.x[idx].unsqueeze(0), self.y[idx].unsqueeze(0)
+        with h5py.File(self.file_path, "r") as f:
+            image_sequence = f["gaussian_seq"][idx]
+            voltage_sequence = f["voltage_seq"][idx]
+        return image_sequence, voltage_sequence
 
 
 ################################
@@ -188,6 +190,7 @@ DATA_SIZE = 10
 LEARNING_RATE = 1e-2
 TRAINING_DATA_SIZE = 500
 BATCH_SIZE = 32
+PATH = "gaussian_2d_sequences.hdf5"
 loss_data = []
 layers = []
 grads = []
@@ -203,7 +206,7 @@ criterion = torch.nn.HuberLoss()
 optimizer = torch.optim.Adam(model.parameters(), lr=LEARNING_RATE)
 
 # Split up the training data into training, validation and testing datasets
-training_data = GaussianDataset(TRAINING_DATA_SIZE)
+training_data = GaussianHDF5Dataset(TRAINING_DATA_SIZE)
 train_loader = DataLoader(
     dataset=training_data, batch_size=BATCH_SIZE, shuffle=True, pin_memory=True
 )
