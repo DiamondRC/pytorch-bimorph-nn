@@ -2,98 +2,88 @@
 # Toy problem 1 - Approximate a guassian function x to return y
 #######################################################################
 
-# https://stackoverflow.com/questions/55920015/how-to-realize-a-polynomial-regression-in-pytorch
-
+import math
 import os
 
-import numpy as np
+import matplotlib.pyplot as plt
 import torch
-from torch import Tensor
-from torch.autograd import Variable
+import torch.nn.functional as F
 from torch.nn import Linear, MSELoss
 from torch.optim import SGD
+from torch.utils.data import DataLoader, Dataset
 
 os.system("clear")
 
-
-def gaussian_generator(data_size):
-    # Creates a big dataset of x and y values for the given function.
-    # y = a*e**(-((x-b)**2)/2*c**2)
-    inputs = []
-    labels = []
-
-    # Loop data_size times to generate the data
-    for _ in range(data_size):
-        # Generate x between 0 and 1000
-        x = np.random.randint(2000) / 1000
-
-        # Corresponding y value using the function
-        y = -3.8 * np.exp(-((x - 0.8) ** 2) / 2 * 2.4**2)
-
-        # Append the values to our input and labels lists
-        inputs.append([x])
-        labels.append([y])
-
-    return inputs, labels
+if torch.cuda.is_available():
+    dev = "cuda:0"
+else:
+    dev = "cpu"
 
 
-# define the model
-class Net(torch.nn.Module):
+class GaussianDataset(Dataset):
+    def __init__(self, data_size, range_min, range_max, mean, std):
+        self.x = (range_max - range_min) * torch.rand(data_size) + range_min
+        self.y = (1 / math.sqrt(2 * std**2)) * torch.exp(
+            -((self.x - mean) ** 2) / 2 * std**2
+        )
+
+    def __len__(self):
+        return len(self.x)
+
+    def __getitem__(self, idx):
+        return self.x[idx].unsqueeze(0), self.y[idx].unsqueeze(0)
+
+
+# Create the learning model
+class Overkill_Function(torch.nn.Module):
     def __init__(self):
         super().__init__()
-        self.fc1 = Linear(1, 1)
+        self.fc1 = Linear(1, 10)
+        self.fc2 = Linear(10, 1)
 
     def forward(self, x):
-        return self.fc1(x)
+        x = F.relu(self.fc1(x))
+        return self.fc2(x)
 
 
-model = Net()
+# Define Constants and Hyperparameters
+MEAN = 0.5
+STD = 0.2
+BATCH_SIZE = 10
+NUM_EPOCHS = 100
+LEARNING_RATE = 0.01
+TRAINING_DATA_SIZE = 100
+RANGE_MIN = -10
+RANGE_MAX = 20
 
-# define the loss function
+model = Overkill_Function()
+if torch.cuda.is_available():
+    model.to("cuda")
 critereon = MSELoss()
-# define the optimizer
-optimizer = SGD(model.parameters(), lr=0.01)
+optimizer = SGD(model.parameters(), lr=LEARNING_RATE)
+training_data = GaussianDataset(TRAINING_DATA_SIZE, RANGE_MIN, RANGE_MAX, MEAN, STD)
+dataloader = DataLoader(dataset=training_data, batch_size=BATCH_SIZE, shuffle=True)
 
-# define the number of epochs and the data set size
-nb_epochs = 5
-data_size = 10
+loss_data = []
 
+# Model training loop
+for epoch in range(NUM_EPOCHS):
+    for x, y in dataloader:
+        optimizer.zero_grad()
+        output = model(x.cuda())
+        loss = critereon(output, y.cuda())
+        loss.backward()
+        optimizer.step()
+    if epoch % 10 == 9:
+        print(f"Epoch: {epoch} Loss: {loss.data}")
+    loss_data.append(loss.cpu().detach().numpy())
 
-# create our training loop
-for epoch in range(nb_epochs):
-    X, y = gaussian_generator(data_size)
-    X = Variable(Tensor(X))
-    y = Variable(Tensor(y))
-    epoch_loss = 0
-    y_pred = model(X)
-    loss = critereon(y_pred, y)
-    epoch_loss = loss.data
-    if epoch % 1000 == 99:
-        print(f"Epoch: {epoch} Loss: {epoch_loss}")
-
-    optimizer.zero_grad()
-    loss.backward()
-    optimizer.step()
-
-
-# Grab a single piece of test data and pass through the NN.
-# Compare the result to the forumla to determine model accuracy.
+# Evaluate model for testing
 model.eval()
-test_data = gaussian_generator(1)
-prediction = model(Variable(Tensor(test_data[0][0])))
 
-print("=" * 50)
-print(f"Checking model with x = {test_data[0][0][0]}")
-
-print()
-print(f"Expected: {test_data[1][0][0]}")
-print(f"Prediction: {prediction.data[0]}")
-
-diff = prediction.data[0] - test_data[1][0][0]
-percentage_diff = (abs(diff) / ((prediction.data[0] + test_data[1][0][0]) / 2)) * 100
-
-print()
-print(f"Diff is: {diff}, {abs(percentage_diff):0.2f}%")
-# Get ~10% error on average.
-# Seems inflated by floating point precision.
-print("=" * 50)
+# Display loss
+plt.plot(range(NUM_EPOCHS), loss_data)
+plt.ylabel("Loss")
+plt.xlabel("epoch")
+plt.show()
+plt.close()
