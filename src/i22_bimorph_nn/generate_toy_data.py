@@ -6,113 +6,109 @@
 import os
 
 import numpy as np
+import torch
+import torch.share
+from torch import tensor
+from torchvision import transforms
 
-# import torch
-# import torch.share
-# from torchvision import transforms
+# import matplotlib.pyplot as plt
 
 os.system("clear")
 
 
-def elliptical_gaussian(x, y, X_0, Y_0, SIGMA_X, SIGMA_Y, A, THETA):
+def elliptical_gaussian(x, y, x_0, y_0, sigma_x, sigma_y, amp, theta):
     """Generates an individual 2D Guassian image with the given parameters"""
-    a = (np.cos(THETA) ** 2) / (2 * SIGMA_X**2) + (np.sin(THETA) ** 2) / (
-        2 * SIGMA_Y**2
+    a = (np.cos(theta) ** 2) / (2 * sigma_x**2) + (np.sin(theta) ** 2) / (
+        2 * sigma_y**2
     )
-    b = -(np.sin(2 * THETA)) / (4 * SIGMA_X**2) + (np.sin(2 * THETA)) / (4 * SIGMA_Y**2)
-    c = (np.sin(THETA) ** 2) / (2 * SIGMA_X**2) + (np.cos(THETA) ** 2) / (
-        2 * SIGMA_Y**2
+    b = -(np.sin(2 * theta)) / (4 * sigma_x**2) + (np.sin(2 * theta)) / (4 * sigma_y**2)
+    c = (np.sin(theta) ** 2) / (2 * sigma_x**2) + (np.cos(theta) ** 2) / (
+        2 * sigma_y**2
     )
-    g = A * np.exp(
-        -(a * ((x - X_0) ** 2) + 2 * b * (x - X_0) * (y - Y_0) + c * ((y - Y_0) ** 2))
+    g = amp * np.exp(
+        -(a * ((x - x_0) ** 2) + 2 * b * (x - x_0) * (y - y_0) + c * ((y - y_0) ** 2))
     )
 
     return g
 
 
-def generate_gaussian2(X_0, Y_0, SIGMA_X, SIGMA_Y, A, THETA, DATA_SIZE):
+def generate_gaussian2(x_0, y_0, sigma_x, sigma_y, amp, theta, SEQUENCE_LENGTH):
     """Creates the 2D gaussian time sequence"""
 
     # Create the grid
-    x, y = np.meshgrid(np.arange(-128, 128, 1), np.arange(-128, 128, 1))
+    x, y = np.meshgrid(np.arange(-112, 112, 1), np.arange(-112, 112, 1))
 
     # Prepare numpy arrays for export.
-    images_out = np.empty(shape=(DATA_SIZE, 1, 256, 256), dtype=float)
-    volt_out = np.empty(shape=(DATA_SIZE, 6), dtype=float)
+    image_sequence = np.empty(shape=(SEQUENCE_LENGTH, 1, 224, 224), dtype=float)
+    voltage_sequence = np.empty(shape=(SEQUENCE_LENGTH, 6), dtype=float)
 
     # Create time series. Start small and deviate overtime.
     # Non-linear, reproducible 'mirror deviation'.
-    for item in range(DATA_SIZE):
+    for item in range(SEQUENCE_LENGTH):
         if item % 2 == 1:
-            A += item * np.cos(item) / 4
+            amp += item * np.cos(item) / 4
         else:
-            A += item * np.cos(2 * item) / 4
+            amp += item * np.cos(2 * item) / 4
         if item <= 7 and item % 3 == 0:
-            SIGMA_X += item / 1.3
+            sigma_x += item / 1.3
         elif item <= 5 and item % 2 == 0:
-            SIGMA_Y += item
-            A += item * np.cos(item) / 4
+            sigma_y += item
+            amp += item * np.cos(item) / 4
         elif item <= 9 and item % 2 == 1:
-            SIGMA_Y += item / 2
-            A += item * np.sin(item) / 4
+            sigma_y += item / 2
+            amp += item * np.sin(item) / 4
         else:
-            SIGMA_X += item / 8
-            SIGMA_Y += item / 8
+            sigma_x += item / 8
+            sigma_y += item / 8
         if item >= 6:
-            A -= 2.5
+            amp -= 2.5
         else:
-            THETA -= 8.9 * (item * np.sin(item) ** 2)
-            SIGMA_X += (50 - SIGMA_X) * 0.1
-            SIGMA_Y += (50 - SIGMA_Y) * 0.1
+            theta -= 8.9 * (item * np.sin(item) ** 2)
+            sigma_x += (50 - sigma_x) * 0.1
+            sigma_y += (50 - sigma_y) * 0.1
 
         # Export images and variables
-        images_out[item, 0, :, :] = elliptical_gaussian(
-            x, y, X_0, Y_0, SIGMA_X, SIGMA_Y, A, THETA
+        image_sequence[-item - 1, 0, :, :] = elliptical_gaussian(
+            x, y, x_0, y_0, sigma_x, sigma_y, amp, theta
         )
-        volt_out[item:] = [
-            [X_0, Y_0, SIGMA_X, SIGMA_Y, A, THETA],
+        voltage_sequence[-item - 1 :] = [
+            [x_0, y_0, sigma_x, sigma_y, amp, theta],
         ]
 
-        # Add some noise
-        images_out[item, 0, :, :] += (
-            np.random.random(np.shape(images_out[item, 0, :, :])) * item / 20
-        )
-
-    # Reverse image order, want unfocused to focused.
-    images_out = np.flip(images_out, 0)
-    volt_out = np.flip(volt_out, 0)
-
-    next_images_out = np.float32(
-        np.array([images_out[i + 3] for i in range(len(images_out) - 3)])
+    # Normalise the images and 'voltages'.
+    norm_img = transforms.Normalize(
+        mean=torch.mean(tensor(image_sequence)), std=torch.std(tensor(image_sequence))
     )
+    norm_image_sequence = norm_img(tensor(image_sequence))
 
-    # Sliding window sequence into batches of three images.
-    images_out = np.float32(
-        np.array([images_out[i : i + 3] for i in range(len(images_out) - 3)])
-    )
+    volt_mean = tensor(voltage_sequence).mean(dim=1, keepdim=True)
+    volt_std = tensor(voltage_sequence).std(dim=1, keepdim=True)
+    norm_voltage_sequence = (tensor(voltage_sequence) - volt_mean) / (volt_std + 1e-10)
 
-    # 'next step' for each image batch.
-    next_volt = np.float32(
-        np.array([volt_out[i + 3] for i in range(len(volt_out) - 3)])
-    )
+    # Return outputs
+    return norm_image_sequence, image_sequence, norm_voltage_sequence, voltage_sequence
 
-    # Channel information at each step.
-    volts_out = np.float32(
-        np.array([volt_out[i : i + 3] for i in range(len(volt_out) - 3)])
-    )
 
-    # # Normalise the images and 'voltages'.
-    # norm_img = transforms.Normalize(mean=torch.mean(image), std=torch.std(image))
+# Uncomment below to check validity of sequence
 
-    # # Potentially using different techniques here could be erroneous?
-    # row_mean = next_volt.mean(dim=1, keepdim=True)
-    # row_std = next_volt.std(dim=1, keepdim=True)
-    # norm_next_volt = (next_volt - row_mean) / row_std
+# norm_image_sequence, image_sequence, norm_voltage_sequence, voltage_sequence = (
+#     generate_gaussian2(
+#         x_0=0, y_0=0, sigma_x=10, sigma_y=10, amp=20, theta=60, SEQUENCE_LENGTH=10
+#     )
+# )
+# for j in range(10):
+#     plt.subplot(2, 10, j + 1)
+#     plt.imshow(norm_image_sequence[j, 0], cmap="hot", interpolation="nearest")
 
-    # row_mean2 = volts_out.mean(dim=1, keepdim=True)
-    # row_std2 = volts_out.std(dim=1, keepdim=True)
-    # norm_volts_out = (volts_out - row_mean2) / (row_std2 + 1e-10)
+#     plt.subplot(2, 10, j + 11)
+#     plt.imshow(
+#         image_sequence[j, 0],
+#         cmap="hot",
+#         interpolation="nearest",
+#         # vmin=np.min(next_images_out[j]),
+#         # vmax=np.max(next_images_out[j]),
+#     )
+# plt.show()
 
-    # norm_images_out = norm_img(image)
-
-    return images_out, next_images_out, next_volt, volts_out
+# print(norm_voltage_sequence)
+# print(voltage_sequence)
