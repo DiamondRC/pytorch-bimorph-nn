@@ -1,5 +1,5 @@
 #######################################################################
-# Toy Problem 1 - Approximate a guassian function
+# Approximate a 1D Gaussian function
 #######################################################################
 
 import math

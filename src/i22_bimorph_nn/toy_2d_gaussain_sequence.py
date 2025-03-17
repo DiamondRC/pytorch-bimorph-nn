@@ -1,5 +1,5 @@
 #######################################################################
-# Toy problem 4 - LSTM Model on Toy Problem
+# Predict next image parameters in 2D Gaussian Sequence
 #######################################################################
 
 import os
