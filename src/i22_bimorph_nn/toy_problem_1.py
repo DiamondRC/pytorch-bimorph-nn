@@ -52,7 +52,7 @@ STD = 0.2
 BATCH_SIZE = 10
 NUM_EPOCHS = 100
 LEARNING_RATE = 0.01
-TRAINING_DATA_SIZE = 100
+TRAINING_DATA_SIZE = 200
 RANGE_MIN = -10
 RANGE_MAX = 20
 
@@ -62,7 +62,9 @@ if torch.cuda.is_available():
 critereon = MSELoss()
 optimizer = SGD(model.parameters(), lr=LEARNING_RATE)
 training_data = GaussianDataset(TRAINING_DATA_SIZE, RANGE_MIN, RANGE_MAX, MEAN, STD)
-dataloader = DataLoader(dataset=training_data, batch_size=BATCH_SIZE, shuffle=True)
+dataloader = DataLoader(
+    dataset=training_data, batch_size=BATCH_SIZE, shuffle=True, pin_memory=True
+)
 
 loss_data = []
 
@@ -73,6 +75,7 @@ for epoch in range(NUM_EPOCHS):
         output = model(x.cuda())
         loss = critereon(output, y.cuda())
         loss.backward()
+        torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
         optimizer.step()
     if epoch % 10 == 9:
         print(f"Epoch: {epoch} Loss: {loss.data}")
