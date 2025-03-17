@@ -137,6 +137,15 @@ SEQUENCE_LENGTH = 10
 
 with h5py.File("gaussian_2d_sequences.hdf5", "w") as f:
     image_dataset = f.create_dataset(
-        "gaussian_seq", (SEQUENCE_LENGTH, 1, 112, 112), dtype="f"
+        "gaussian_seq", (NUM_SEQUENCES, SEQUENCE_LENGTH, 1, 224, 224), dtype="f"
     )
-    voltage_dataset = f.create_dataset("voltage_seq", (SEQUENCE_LENGTH, 6), dtype="f")
+    voltage_dataset = f.create_dataset(
+        "voltage_seq", (NUM_SEQUENCES, SEQUENCE_LENGTH, 6), dtype="f"
+    )
+
+    for i in range(0, NUM_SEQUENCES):
+        image_sequence, voltage_sequence = generate_gaussian2(
+            *generate_seed(), SEQUENCE_LENGTH
+        )
+        image_dataset[i] = image_sequence
+        voltage_dataset[i] = voltage_sequence
