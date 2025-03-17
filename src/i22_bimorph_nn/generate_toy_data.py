@@ -4,7 +4,9 @@
 
 
 import os
+import random
 
+import h5py
 import numpy as np
 import torch
 import torch.share
@@ -75,22 +77,28 @@ def generate_gaussian2(x_0, y_0, sigma_x, sigma_y, amp, theta, SEQUENCE_LENGTH):
             [x_0, y_0, sigma_x, sigma_y, amp, theta],
         ]
 
+    image_sequence = tensor(image_sequence)
+    voltage_sequence = tensor(voltage_sequence)
+
     # Normalise the images and 'voltages'.
     norm_img = transforms.Normalize(
-        mean=torch.mean(tensor(image_sequence)), std=torch.std(tensor(image_sequence))
+        mean=torch.mean(image_sequence), std=torch.std(image_sequence)
     )
     norm_image_sequence = norm_img(tensor(image_sequence))
 
-    volt_mean = tensor(voltage_sequence).mean(dim=1, keepdim=True)
-    volt_std = tensor(voltage_sequence).std(dim=1, keepdim=True)
-    norm_voltage_sequence = (tensor(voltage_sequence) - volt_mean) / (volt_std + 1e-10)
+    volt_mean = voltage_sequence.mean(dim=1, keepdim=True)
+    volt_std = voltage_sequence.std(dim=1, keepdim=True)
+    norm_voltage_sequence = (voltage_sequence - volt_mean) / (volt_std + 1e-10)
 
     # Return outputs
-    return norm_image_sequence, image_sequence, norm_voltage_sequence, voltage_sequence
+    return norm_image_sequence, norm_voltage_sequence
 
 
 # Uncomment below to check validity of sequence
 
+# return norm_image_sequence, image_sequence, norm_voltage_sequence, voltage_sequence
+
+# import matplotlib.pyplot as plt
 # norm_image_sequence, image_sequence, norm_voltage_sequence, voltage_sequence = (
 #     generate_gaussian2(
 #         x_0=0, y_0=0, sigma_x=10, sigma_y=10, amp=20, theta=60, SEQUENCE_LENGTH=10
@@ -112,3 +120,23 @@ def generate_gaussian2(x_0, y_0, sigma_x, sigma_y, amp, theta, SEQUENCE_LENGTH):
 
 # print(norm_voltage_sequence)
 # print(voltage_sequence)
+
+
+def generate_seed():
+    X_0 = random.uniform(-80, 80)
+    Y_0 = random.uniform(-80, 80)
+    SIGMA_X = random.uniform(8, 12)
+    SIGMA_Y = SIGMA_X
+    A = random.uniform(17, 19)
+    THETA = random.uniform(20, 160)
+    return X_0, Y_0, SIGMA_X, SIGMA_Y, A, THETA
+
+
+NUM_SEQUENCES = 1000
+SEQUENCE_LENGTH = 10
+
+with h5py.File("gaussian_2d_sequences.hdf5", "w") as f:
+    image_dataset = f.create_dataset(
+        "gaussian_seq", (SEQUENCE_LENGTH, 1, 112, 112), dtype="f"
+    )
+    voltage_dataset = f.create_dataset("voltage_seq", (SEQUENCE_LENGTH, 6), dtype="f")
