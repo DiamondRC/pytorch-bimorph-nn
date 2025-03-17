@@ -1,5 +1,5 @@
 #######################################################################
-# Toy problem 1 - Approximate a guassian function x to return y
+# Toy Problem 1 - Approximate a guassian function
 #######################################################################
 
 import math
@@ -9,7 +9,6 @@ import matplotlib.pyplot as plt
 import torch
 import torch.nn.functional as F
 from torch.nn import Linear, MSELoss
-from torch.optim import SGD
 from torch.utils.data import DataLoader, Dataset
 
 os.system("clear")
@@ -38,39 +37,44 @@ class GaussianDataset(Dataset):
 class Overkill_Function(torch.nn.Module):
     def __init__(self):
         super().__init__()
-        self.fc1 = Linear(1, 10)
-        self.fc2 = Linear(10, 1)
+        self.fc1 = Linear(1, 20)
+        self.fc2 = Linear(20, 20)
+        self.fc3 = Linear(20, 1)
 
     def forward(self, x):
         x = F.relu(self.fc1(x))
-        return self.fc2(x)
+        x = F.relu(self.fc2(x))
+        return self.fc3(x)
 
 
 # Define Constants and Hyperparameters
 MEAN = 0.5
 STD = 0.2
 BATCH_SIZE = 10
-NUM_EPOCHS = 100
-LEARNING_RATE = 0.01
-TRAINING_DATA_SIZE = 200
+NUM_EPOCHS = 200
+LEARNING_RATE = 1e-2
+TRAINING_DATA_SIZE = 500
 RANGE_MIN = -10
 RANGE_MAX = 20
 
+loss_data = []
+
+# Create model and send to GPU
 model = Overkill_Function()
 if torch.cuda.is_available():
     model.to("cuda")
 critereon = MSELoss()
-optimizer = SGD(model.parameters(), lr=LEARNING_RATE)
+optimizer = torch.optim.Adam(model.parameters(), lr=LEARNING_RATE)
+
+# Split up the training data into training, validation and testing datasets
 training_data = GaussianDataset(TRAINING_DATA_SIZE, RANGE_MIN, RANGE_MAX, MEAN, STD)
-dataloader = DataLoader(
+train_loader = DataLoader(
     dataset=training_data, batch_size=BATCH_SIZE, shuffle=True, pin_memory=True
 )
 
-loss_data = []
-
 # Model training loop
 for epoch in range(NUM_EPOCHS):
-    for x, y in dataloader:
+    for x, y in train_loader:
         optimizer.zero_grad()
         output = model(x.cuda())
         loss = critereon(output, y.cuda())
@@ -81,12 +85,30 @@ for epoch in range(NUM_EPOCHS):
         print(f"Epoch: {epoch} Loss: {loss.data}")
     loss_data.append(loss.cpu().detach().numpy())
 
-# Evaluate model for testing
+# Prepare model for testing
 model.eval()
 
 # Display loss
 plt.plot(range(NUM_EPOCHS), loss_data)
 plt.ylabel("Loss")
-plt.xlabel("epoch")
+plt.xlabel("Epochs")
 plt.show()
 plt.close()
+
+# Plot model against truth
+model_y = []
+training_y = []
+with torch.no_grad():
+    full_range = torch.arange(RANGE_MIN, RANGE_MAX, 0.01).unsqueeze(1)
+    plt.scatter(training_data.x.cpu(), training_data.y.cpu(), label="Data")
+    plt.plot(
+        full_range.cpu().detach().numpy(),
+        model(full_range.cuda()).cpu().detach().numpy(),
+        color="red",
+        label="Model",
+    )
+    plt.title("Test Model")
+    plt.legend(loc="upper right")
+    plt.xlabel("x")
+    plt.ylabel("y")
+    plt.show()
