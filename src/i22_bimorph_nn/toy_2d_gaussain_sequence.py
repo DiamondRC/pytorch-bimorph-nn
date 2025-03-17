@@ -3,13 +3,12 @@
 #######################################################################
 
 import os
-import random
 
 import h5py
 import matplotlib.pyplot as plt
 import torch
 import torch.share
-from torch.utils.data import DataLoader, Dataset
+from torch.utils.data import DataLoader, Dataset, random_split
 
 os.system("clear")
 
@@ -89,15 +88,6 @@ class Focusing_Sequence(torch.nn.Module):
         )
 
         hidden_size = int((2 / 3 * 256) + 44)
-        # self.sequence = torch.nn.LSTM(
-        #     # Learn temporal component of values.
-        #     input_size=256,
-        #     hidden_size=hidden_size,
-        #     num_layers=3,
-        #     batch_first=True,
-        #     dropout=0.3,
-        #     bidirectional=False,
-        # )
 
         self.sequence = torch.nn.GRU(
             input_size=256,
@@ -173,24 +163,14 @@ def init_weights(m):
                 torch.nn.init.zeros_(param)
 
 
-# Generate consistent seeds
-def generate_seed():
-    X_0 = random.uniform(-80, 80)
-    Y_0 = random.uniform(-80, 80)
-    SIGMA_X = random.uniform(8, 12)
-    SIGMA_Y = SIGMA_X
-    A = random.uniform(17, 19)
-    THETA = random.uniform(20, 160)
-    DATA_SIZE = 10
-    return X_0, Y_0, SIGMA_X, SIGMA_Y, A, THETA, DATA_SIZE
-
-
 NUM_EPOCHS = 100
 DATA_SIZE = 10
 LEARNING_RATE = 1e-2
 TRAINING_DATA_SIZE = 500
 BATCH_SIZE = 32
 PATH = "gaussian_2d_sequences.hdf5"
+TRAIN_RATIO = 0.7
+VAL_RATIO = 0.15
 loss_data = []
 layers = []
 grads = []
@@ -207,8 +187,20 @@ optimizer = torch.optim.Adam(model.parameters(), lr=LEARNING_RATE)
 
 # Split up the training data into training, validation and testing datasets
 training_data = GaussianHDF5Dataset(TRAINING_DATA_SIZE)
+train_size = int(TRAIN_RATIO * len(training_data))
+val_size = int(VAL_RATIO * len(training_data))
+test_size = len(training_data) - train_size - val_size
+train_dataset, val_dataset, test_dataset = random_split(
+    training_data, [train_size, val_size, test_size]
+)
 train_loader = DataLoader(
-    dataset=training_data, batch_size=BATCH_SIZE, shuffle=True, pin_memory=True
+    dataset=train_dataset, batch_size=BATCH_SIZE, shuffle=True, pin_memory=True
+)
+val_loader = DataLoader(  # For consistency in testing, shuffle=False
+    dataset=val_dataset, batch_size=BATCH_SIZE, shuffle=False, pin_memory=True
+)
+test_loader = DataLoader(
+    dataset=test_dataset, batch_size=BATCH_SIZE, shuffle=False, pin_memory=True
 )
 
 
@@ -250,97 +242,3 @@ plt.ylabel("Loss")
 plt.xlabel("Epoch")
 plt.show()
 plt.close()
-
-# for img_name in range(5):
-#     # Generate focusing sequence
-#     X_0, Y_0, SIGMA_X, SIGMA_Y, A, THETA, DATA_SIZE = generate_seed()
-
-#     images_out, next_images_out, next_volt, volts_out = generate_gaussian2(
-#         X_0, Y_0, SIGMA_X, SIGMA_Y, A, THETA, DATA_SIZE
-#     )
-
-#     # Normalise inputs.
-#     image = Variable(tensor(images_out.copy(), device="cuda"))
-#     volts_out = Variable(tensor(volts_out.copy(), device="cuda"))
-
-#     norm_img = transforms.Normalize(mean=torch.mean(image), std=torch.std(image))
-
-#     row_mean2 = volts_out.mean(dim=1, keepdim=True)
-#     row_std2 = volts_out.std(dim=1, keepdim=True)
-#     norm_volts_out = (volts_out - row_mean2) / (row_std2 + 1e-10)
-
-#     norm_images_out = norm_img(image)
-
-#     # Model prediction
-#     prediction = model(norm_images_out, norm_volts_out)
-
-#     # Denormalise
-#     prediction = prediction * row_std + row_mean
-
-#     # Debug out
-#     print("=" * 20)
-#     print(f"X_0: {prediction[:, 0].cpu().detach().numpy()}")
-#     print(f"X_0_real: {next_volt[:, 0]}")
-#     print()
-#     print(f"Y_0: {prediction[:, 1].cpu().detach().numpy()}")
-#     print(f"Y_0_real: {next_volt[:, 1]}")
-#     print()
-#     print(f"SIGMA_X: {prediction[:, 2].cpu().detach().numpy()}")
-#     print(f"SIGMA_X_real: {next_volt[:, 2]}")
-#     print()
-#     print(f"SIGMA_Y: {prediction[:, 3].cpu().detach().numpy()}")
-#     print(f"SIGMA_Y_real: {next_volt[:, 3]}")
-#     print()
-#     print(f"A: {prediction[:, 4].cpu().detach().numpy()}")
-#     print(f"A_real: {next_volt[:, 4]}")
-#     print()
-#     print(f"THETA: {prediction[:, 5].cpu().detach().numpy()}")
-#     print(f"THETA_real: {next_volt[:, 5]}")
-
-#     # Copy/grid for plotting
-#     prediction_copy = prediction.cpu().detach().numpy().copy()
-#     x, y = np.meshgrid(np.arange(-128, 128, 1), np.arange(-128, 128, 1))
-
-#     # Compare model prediction to data
-#     for j in range(7):
-#         plt.subplot(3, 7, j + 1)
-#         plt.imshow(next_images_out[j, 0], cmap="hot", interpolation="nearest")
-
-#         model_images_out = elliptical_gaussian(x, y, *prediction_copy[j])
-#         plt.subplot(3, 7, j + 8)
-#         plt.imshow(
-#             model_images_out,
-#             cmap="hot",
-#             interpolation="nearest",
-#             vmin=np.min(next_images_out[j]),
-#             vmax=np.max(next_images_out[j]),
-#         )
-#         # ^Switch to this for a like-to-like comparison of model and actual.
-#         # plt.imshow(model_images_out, cmap="hot", interpolation="nearest")
-
-#         plt.subplot(3, 7, j + 15)
-#         plt.imshow(
-#             next_images_out[j, 0] - model_images_out,
-#             cmap="hot",
-#             interpolation="nearest",
-#         )
-#     plt.savefig(f"imgs/{img_name}.png")
-#     plt.show()
-
-# # Plot gradient values for debugging.
-# for name, param in model.named_parameters():
-#     if param.grad is not None:
-#         plt.figure(figsize=(6, 4))
-#         plt.hist(
-#             param.grad.cpu().view(-1).detach().numpy(),
-#             bins=500,
-#             alpha=0.7,
-#             color="blue",
-#         )
-#         plt.title(f"Gradient Histogram for {name}")
-#         plt.xlabel("Gradient Value")
-#         plt.ylabel("Frequency")
-#         plt.grid(True)
-#         # plt.savefig(f"imgs/{name}.png")
-#         # plt.close()
-#         plt.show()
