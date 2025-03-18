@@ -18,14 +18,19 @@ else:
     dev = "cpu"
 
 
+################################
+# Load data
+################################
+
+
 class GaussianHDF5Dataset(Dataset):
     def __init__(self):
         self.file_path = PATH
         with h5py.File(self.file_path, "r") as f:
-            self.data_len = len(f["image_dataset"])
+            self.data_len = f["gaussian_seq"].shape[0]
 
     def __len__(self):
-        return len(self.data_len)
+        return self.data_len
 
     def __getitem__(self, idx):
         with h5py.File(self.file_path, "r") as f:
@@ -62,89 +67,31 @@ class Focusing_Sequence(torch.nn.Module):
             torch.nn.LeakyReLU(),
             torch.nn.Dropout2d(p=0.2),
             torch.nn.MaxPool2d(kernel_size=(2, 2), stride=(2, 2)),
-            #
-            torch.nn.Conv2d(
-                in_channels=32, out_channels=64, kernel_size=(3, 3), padding=1
-            ),
-            torch.nn.BatchNorm2d(num_features=64),
-            torch.nn.LeakyReLU(),
-            torch.nn.Dropout2d(p=0.2),
-            #
-            torch.nn.Conv2d(
-                in_channels=64, out_channels=128, kernel_size=(3, 3), padding=1
-            ),
-            torch.nn.BatchNorm2d(num_features=128),
-            torch.nn.LeakyReLU(),
-            torch.nn.Dropout2d(p=0.2),
-            #
-            torch.nn.Conv2d(
-                in_channels=128, out_channels=256, kernel_size=(3, 3), padding=1
-            ),
-            torch.nn.BatchNorm2d(num_features=256),
-            torch.nn.LeakyReLU(),
-            torch.nn.Dropout2d(p=0.2),
-            # Collape to number of features by discarding pixel leftovers.
-            torch.nn.AdaptiveAvgPool2d((1, 1)),
         )
 
-        hidden_size = int((2 / 3 * 256) + 44)
-
-        self.sequence = torch.nn.GRU(
-            input_size=256,
-            hidden_size=hidden_size,
-            num_layers=2,
-            batch_first=True,
-        )
-
-        self.LSTM_out_norm = torch.nn.LayerNorm(hidden_size)
-
-        self.flat = torch.nn.Sequential(
-            torch.nn.Flatten(),
-        )
-
-        self.pos = torch.nn.Sequential(
-            torch.nn.Linear(hidden_size, 2),
-            torch.nn.LeakyReLU(),
-        )
-        self.sigmax = torch.nn.Sequential(
-            torch.nn.Linear(hidden_size, 1),
-            torch.nn.LeakyReLU(),
-        )
-        self.sigmay = torch.nn.Sequential(
-            torch.nn.Linear(hidden_size, 1),
-            torch.nn.LeakyReLU(),
-        )
-        self.A = torch.nn.Sequential(
-            torch.nn.Linear(hidden_size, 1),
-            torch.nn.LeakyReLU(),
-        )
-        self.THETA = torch.nn.Sequential(
-            torch.nn.Linear(hidden_size, 1),
+        self.params = torch.nn.Sequential(
+            torch.nn.Linear(7, 6),
             torch.nn.LeakyReLU(),
         )
 
-    def forward(self, image, volts_out):
-        batch_size, sequence_length = image.shape[:2]
-        features = []
+    def forward(self, x):
+        x = self.image_conv(x)
+        x = self.params(x)
+        return x
 
-        # Process each batch of images from the input.
-        for t in range(batch_size):
-            image_batch = image[t, :]
-            features.append(self.flat(self.image_conv(image_batch)))
-        image_features = torch.stack(features, dim=0)
-        # Process features through LSTM
-        LSTM_out = self.LSTM_out_norm(self.sequence(image_features)[0])
 
-        # Determine params with seperate linear transforms.
-        position = self.pos(LSTM_out[:, -1])
-        sigmax = self.sigmax(LSTM_out[:, -1])
-        sigmay = self.sigmay(LSTM_out[:, -1])
-        amplitude = self.A(LSTM_out[:, -1])
-        THETA = self.THETA(LSTM_out[:, -1])
-
-        out = torch.cat((position, sigmax, sigmay, amplitude, THETA), dim=-1)
-
-        return out
+# Define Constants and Hyperparameters
+NUM_EPOCHS = 100
+DATA_SIZE = 10
+LEARNING_RATE = 1e-2
+TRAINING_DATA_SIZE = 1000
+BATCH_SIZE = 32
+PATH = "gaussian_2d_sequences.hdf5"
+TRAIN_RATIO = 0.7
+VAL_RATIO = 0.15
+loss_data = []
+layers = []
+grads = []
 
 
 # Pre-set weights in all model layers.
@@ -163,18 +110,6 @@ def init_weights(m):
                 torch.nn.init.zeros_(param)
 
 
-NUM_EPOCHS = 100
-DATA_SIZE = 10
-LEARNING_RATE = 1e-2
-TRAINING_DATA_SIZE = 500
-BATCH_SIZE = 32
-PATH = "gaussian_2d_sequences.hdf5"
-TRAIN_RATIO = 0.7
-VAL_RATIO = 0.15
-loss_data = []
-layers = []
-grads = []
-
 model = Focusing_Sequence()
 model.apply(init_weights)
 
@@ -186,13 +121,14 @@ criterion = torch.nn.HuberLoss()
 optimizer = torch.optim.Adam(model.parameters(), lr=LEARNING_RATE)
 
 # Split up the training data into training, validation and testing datasets
-training_data = GaussianHDF5Dataset(TRAINING_DATA_SIZE)
+training_data = GaussianHDF5Dataset()
 train_size = int(TRAIN_RATIO * len(training_data))
 val_size = int(VAL_RATIO * len(training_data))
 test_size = len(training_data) - train_size - val_size
 train_dataset, val_dataset, test_dataset = random_split(
     training_data, [train_size, val_size, test_size]
 )
+
 train_loader = DataLoader(
     dataset=train_dataset, batch_size=BATCH_SIZE, shuffle=True, pin_memory=True
 )
@@ -209,10 +145,10 @@ test_loader = DataLoader(
 ################################
 
 for epoch in range(NUM_EPOCHS):
-    for x, y in train_loader:
+    for image_sequence, voltage_sequence in train_loader:
         optimizer.zero_grad()
-        output = model(x.cuda())
-        loss = criterion(output, y.cuda())
+        output = model(image_sequence.cuda())
+        loss = criterion(output, voltage_sequence.cuda())
         loss.backward()
         torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
         optimizer.step()
