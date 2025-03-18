@@ -67,16 +67,34 @@ class Focusing_Sequence(torch.nn.Module):
             torch.nn.LeakyReLU(),
             torch.nn.Dropout2d(p=0.2),
             torch.nn.MaxPool2d(kernel_size=(2, 2), stride=(2, 2)),
+            #
+            torch.nn.Conv2d(
+                in_channels=32, out_channels=64, kernel_size=(3, 3), padding=1
+            ),
+            torch.nn.BatchNorm2d(num_features=64),
+            torch.nn.LeakyReLU(),
+            torch.nn.Dropout2d(p=0.2),
+            torch.nn.MaxPool2d(kernel_size=(2, 2), stride=(2, 2)),
+            torch.nn.AdaptiveAvgPool2d((1, 1)),
         )
 
         self.params = torch.nn.Sequential(
-            torch.nn.Linear(7, 6),
+            torch.nn.Linear(64, 6),
             torch.nn.LeakyReLU(),
         )
 
     def forward(self, x):
+        # print(x.size())
+        x = x.view(BATCH_SIZE * SEQUENCE_LENGTH, 1, 224, 224)
+        # print(x.size())
         x = self.image_conv(x)
+        # print(x.size())
+        x = x.view(BATCH_SIZE * SEQUENCE_LENGTH, -1)
+        # print(x.size())
         x = self.params(x)
+        # print(x.size())
+        x = x.view(BATCH_SIZE, SEQUENCE_LENGTH, -1)
+        # print(x.size())
         return x
 
 
@@ -84,8 +102,9 @@ class Focusing_Sequence(torch.nn.Module):
 NUM_EPOCHS = 100
 DATA_SIZE = 10
 LEARNING_RATE = 1e-2
-TRAINING_DATA_SIZE = 1000
-BATCH_SIZE = 32
+TRAINING_DATA_SIZE = 100
+SEQUENCE_LENGTH = 10
+BATCH_SIZE = 7
 PATH = "gaussian_2d_sequences.hdf5"
 TRAIN_RATIO = 0.7
 VAL_RATIO = 0.15
@@ -102,12 +121,6 @@ def init_weights(m):
         )
         if m.bias is not None:
             torch.nn.init.zeros_(m.bias)
-    if isinstance(m, torch.nn.LSTM):
-        for name, param in m.named_parameters():
-            if "weight" in name:
-                torch.nn.init.xavier_normal_(param)
-            elif "bias" in name:
-                torch.nn.init.zeros_(param)
 
 
 model = Focusing_Sequence()
@@ -152,7 +165,7 @@ for epoch in range(NUM_EPOCHS):
         loss.backward()
         torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
         optimizer.step()
-    if epoch % 10 == 0:
+    if epoch % 5 == 0:
         print(f"Epoch: {epoch} Loss: {loss.data}")
     loss_data.append(loss.cpu().detach().numpy())
 
