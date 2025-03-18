@@ -3,9 +3,11 @@
 #######################################################################
 
 import os
+import random
 
 import h5py
 import matplotlib.pyplot as plt
+import numpy as np
 import torch
 import torch.share
 from torch.utils.data import DataLoader, Dataset, random_split
@@ -35,7 +37,9 @@ class GaussianHDF5Dataset(Dataset):
     def __getitem__(self, idx):
         with h5py.File(self.file_path, "r") as f:
             image_sequence = f["gaussian_seq"][idx]
+            image_sequence = image_sequence[0:-1]
             voltage_sequence = f["voltage_seq"][idx]
+            voltage_sequence = voltage_sequence[1:]
         return image_sequence, voltage_sequence
 
 
@@ -65,7 +69,7 @@ class Focusing_Sequence(torch.nn.Module):
             ),
             torch.nn.BatchNorm2d(num_features=32),
             torch.nn.LeakyReLU(),
-            torch.nn.Dropout2d(p=0.2),
+            # torch.nn.Dropout2d(p=0.2),
             torch.nn.MaxPool2d(kernel_size=(2, 2), stride=(2, 2)),
             #
             torch.nn.Conv2d(
@@ -73,15 +77,12 @@ class Focusing_Sequence(torch.nn.Module):
             ),
             torch.nn.BatchNorm2d(num_features=64),
             torch.nn.LeakyReLU(),
-            torch.nn.Dropout2d(p=0.2),
+            # torch.nn.Dropout2d(p=0.2),
             torch.nn.MaxPool2d(kernel_size=(2, 2), stride=(2, 2)),
             torch.nn.AdaptiveAvgPool2d((1, 1)),
         )
 
-        self.params = torch.nn.Sequential(
-            torch.nn.Linear(64, 6),
-            torch.nn.LeakyReLU(),
-        )
+        self.params = torch.nn.Linear(64, 6)
 
     def forward(self, x):
         # print(x.size())
@@ -103,8 +104,8 @@ NUM_EPOCHS = 100
 DATA_SIZE = 10
 LEARNING_RATE = 1e-2
 TRAINING_DATA_SIZE = 100
-SEQUENCE_LENGTH = 10
-BATCH_SIZE = 7
+SEQUENCE_LENGTH = 9
+BATCH_SIZE = 5
 PATH = "gaussian_2d_sequences.hdf5"
 TRAIN_RATIO = 0.7
 VAL_RATIO = 0.15
@@ -130,7 +131,7 @@ if torch.cuda.is_available():
     model.to("cuda")
 
 # Define loss, optimiser and run parameters.
-criterion = torch.nn.HuberLoss()
+criterion = torch.nn.MSELoss()
 optimizer = torch.optim.Adam(model.parameters(), lr=LEARNING_RATE)
 
 # Split up the training data into training, validation and testing datasets
@@ -183,11 +184,32 @@ for epoch in range(NUM_EPOCHS):
 # Testing
 ################################
 
+# Prepare model for testing
 model.eval()
 
 # Display loss
 plt.plot(range(NUM_EPOCHS), loss_data)
 plt.ylabel("Loss")
-plt.xlabel("Epoch")
+plt.xlabel("Epochs")
 plt.show()
 plt.close()
+
+# Plot model against truth
+predicted_voltages = []
+expected_voltages = []
+with torch.no_grad():
+    for image_sequence, voltage_sequence in test_loader:
+        output = model(image_sequence.cuda())
+        predicted_voltages.append(output.cpu())
+        expected_voltages.append(voltage_sequence.cpu())
+    predicted_voltages = np.asarray(predicted_voltages)
+    expected_voltages = np.asarray(expected_voltages)
+    err = expected_voltages - predicted_voltages
+    per_err = (expected_voltages / err) * 100
+    for _ in range(5):
+        index = random.randrange(1, 18)
+        print(f"expected_voltages:  {expected_voltages[index, 0, 0]}")
+        print(f"predicted_voltages: {predicted_voltages[index, 0, 0]}")
+        print(f"err:                {err[index, 0, 0]}")
+        print(f"per_err:            {per_err[index, 0, 0]}")
+        print("=========")
