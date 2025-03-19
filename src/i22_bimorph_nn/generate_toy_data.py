@@ -96,7 +96,7 @@ def generate_gaussian2(x_0, y_0, sigma_x, sigma_y, amp, theta, SEQUENCE_LENGTH):
 
 # Uncomment below to check validity of sequence
 
-# return norm_image_sequence, image_sequence, norm_voltage_sequence, voltage_sequence
+#     return norm_image_sequence, image_sequence, norm_voltage_sequence,voltage_sequence
 
 # import matplotlib.pyplot as plt
 # norm_image_sequence, image_sequence, norm_voltage_sequence, voltage_sequence = (
@@ -132,7 +132,7 @@ def generate_seed():
     return X_0, Y_0, SIGMA_X, SIGMA_Y, A, THETA
 
 
-NUM_SEQUENCES = 100
+NUM_SEQUENCES = 600
 SEQUENCE_LENGTH = 10
 
 with h5py.File("gaussian_2d_sequences.hdf5", "w") as f:

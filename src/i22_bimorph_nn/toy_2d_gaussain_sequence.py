@@ -37,10 +37,11 @@ class GaussianHDF5Dataset(Dataset):
     def __getitem__(self, idx):
         with h5py.File(self.file_path, "r") as f:
             image_sequence = f["gaussian_seq"][idx]
-            image_sequence = image_sequence[0:-1]
+            image_sequence = image_sequence[:-1]
             voltage_sequence = f["voltage_seq"][idx]
-            voltage_sequence = voltage_sequence[1:]
-        return image_sequence, voltage_sequence
+            shifted_voltage_sequence = voltage_sequence[1:]
+            voltage_sequence = voltage_sequence[:-1]
+        return image_sequence, shifted_voltage_sequence, voltage_sequence
 
 
 ################################
@@ -82,9 +83,14 @@ class Focusing_Sequence(torch.nn.Module):
             torch.nn.AdaptiveAvgPool2d((1, 1)),
         )
 
-        self.params = torch.nn.Linear(64, 6)
+        self.voltage = torch.nn.Sequential(
+            torch.nn.Linear(6, 64),
+            torch.nn.LeakyReLU(),
+        )
 
-    def forward(self, x):
+        self.params = torch.nn.Linear(128, 6)
+
+    def forward(self, x, y):
         # print(x.size())
         x = x.view(BATCH_SIZE * SEQUENCE_LENGTH, 1, 224, 224)
         # print(x.size())
@@ -92,18 +98,24 @@ class Focusing_Sequence(torch.nn.Module):
         # print(x.size())
         x = x.view(BATCH_SIZE * SEQUENCE_LENGTH, -1)
         # print(x.size())
+        # print(y.size())
+        y = y.view(BATCH_SIZE * SEQUENCE_LENGTH, 6)
+        # print(y.size())
+        y = self.voltage(y)
+        # print(y.size())
+        # print(f"concat: {x.size()}, {y.size()}")
+        x = torch.concatenate((x, y), dim=1)
+        # print(x.size())
         x = self.params(x)
         # print(x.size())
-        x = x.view(BATCH_SIZE, SEQUENCE_LENGTH, -1)
+        x = x.view(BATCH_SIZE, SEQUENCE_LENGTH, 6)
         # print(x.size())
         return x
 
 
 # Define Constants and Hyperparameters
-NUM_EPOCHS = 100
-DATA_SIZE = 10
+NUM_EPOCHS = 50
 LEARNING_RATE = 1e-2
-TRAINING_DATA_SIZE = 100
 SEQUENCE_LENGTH = 9
 BATCH_SIZE = 5
 PATH = "gaussian_2d_sequences.hdf5"
@@ -159,10 +171,10 @@ test_loader = DataLoader(
 ################################
 
 for epoch in range(NUM_EPOCHS):
-    for image_sequence, voltage_sequence in train_loader:
+    for image_sequence, shifted_voltage_sequence, voltage_sequence in train_loader:
         optimizer.zero_grad()
-        output = model(image_sequence.cuda())
-        loss = criterion(output, voltage_sequence.cuda())
+        output = model(image_sequence.cuda(), voltage_sequence.cuda())
+        loss = criterion(output, shifted_voltage_sequence.cuda())
         loss.backward()
         torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
         optimizer.step()
@@ -198,14 +210,14 @@ plt.close()
 predicted_voltages = []
 expected_voltages = []
 with torch.no_grad():
-    for image_sequence, voltage_sequence in test_loader:
-        output = model(image_sequence.cuda())
+    for image_sequence, shifted_voltage_sequence, voltage_sequence in test_loader:
+        output = model(image_sequence.cuda(), voltage_sequence.cuda())
         predicted_voltages.append(output.cpu())
-        expected_voltages.append(voltage_sequence.cpu())
+        expected_voltages.append(shifted_voltage_sequence.cpu())
     predicted_voltages = np.asarray(predicted_voltages)
     expected_voltages = np.asarray(expected_voltages)
     err = expected_voltages - predicted_voltages
-    per_err = (expected_voltages / err) * 100
+    per_err = ((predicted_voltages - expected_voltages) / expected_voltages) * 100
     for _ in range(5):
         index = random.randrange(1, 18)
         print(f"expected_voltages:  {expected_voltages[index, 0, 0]}")
