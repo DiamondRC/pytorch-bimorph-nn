@@ -55,15 +55,16 @@ def generate_gaussian2(x_0, y_0, sigma_x, sigma_y, amp, theta, SEQUENCE_LENGTH):
             sigma_x += item / 1.3
         elif item <= 5 and item % 2 == 0:
             sigma_y += item
-            amp += item * np.cos(item) / 4
+            amp += item * abs(np.cos(item)) / 2
         elif item <= 9 and item % 2 == 1:
             sigma_y += item / 2
-            amp += item * np.sin(item) / 4
+            amp += item * abs(np.sin(item)) / 3
         else:
             sigma_x += item / 8
             sigma_y += item / 8
         if item >= 6:
             amp -= 2.5
+            ...
         else:
             theta -= 8.9 * (item * np.sin(item) ** 2)
             sigma_x += (50 - sigma_x) * 0.1
@@ -73,12 +74,12 @@ def generate_gaussian2(x_0, y_0, sigma_x, sigma_y, amp, theta, SEQUENCE_LENGTH):
         image_sequence[-item - 1, 0, :, :] = elliptical_gaussian(
             x, y, x_0, y_0, sigma_x, sigma_y, amp, theta
         )
-        voltage_sequence[-item - 1 :] = [
-            [x_0, y_0, sigma_x, sigma_y, amp, theta],
-        ]
+        voltage_sequence[-item - 1, :] = [x_0, y_0, sigma_x, sigma_y, amp, theta]
 
     image_sequence = tensor(image_sequence)
-    voltage_sequence = tensor(voltage_sequence)
+    voltage_sequence = tensor(voltage_sequence.copy())
+
+    norm_voltage_sequence = voltage_sequence
 
     # Normalise the images and 'voltages'.
     norm_img = transforms.Normalize(
@@ -92,13 +93,12 @@ def generate_gaussian2(x_0, y_0, sigma_x, sigma_y, amp, theta, SEQUENCE_LENGTH):
 
     norm_info = torch.concat((volt_mean, volt_std), dim=1)
 
-    # Return outputs
     return norm_image_sequence, norm_voltage_sequence, norm_info
 
 
 # Uncomment below to check validity of sequence
 
-#     return norm_image_sequence, image_sequence, norm_voltage_sequence,voltage_sequence
+# return norm_image_sequence, image_sequence, norm_voltage_sequence,voltage_sequence
 
 # import matplotlib.pyplot as plt
 # norm_image_sequence, image_sequence, norm_voltage_sequence, voltage_sequence = (
