@@ -134,7 +134,7 @@ def generate_seed():
     return X_0, Y_0, SIGMA_X, SIGMA_Y, A, THETA
 
 
-NUM_SEQUENCES = 600
+NUM_SEQUENCES = 300
 SEQUENCE_LENGTH = 10
 
 with h5py.File("gaussian_2d_sequences.hdf5", "w") as f:
