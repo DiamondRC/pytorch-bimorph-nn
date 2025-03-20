@@ -204,12 +204,7 @@ expected_voltages = []
 with torch.no_grad():
     x, y = np.meshgrid(np.arange(-128, 128, 1), np.arange(-128, 128, 1))
 
-    for i, (
-        image_sequence,
-        _,
-        voltage_sequence,
-        norm_info,
-    ) in enumerate(test_loader):
+    for i, (image_sequence, _, voltage_sequence, norm_info) in enumerate(test_loader):
         if i == 1:
             break
         test_image_sequence = image_sequence[:, :, 0]
