@@ -93,30 +93,19 @@ class Focusing_Sequence(torch.nn.Module):
         self.params = torch.nn.Linear(128, 6)
 
     def forward(self, x, y):
-        # print(x.size())
         x = x.view(BATCH_SIZE * SEQUENCE_LENGTH, 1, 224, 224)
-        # print(x.size())
         x = self.image_conv(x)
-        # print(x.size())
         x = x.view(BATCH_SIZE * SEQUENCE_LENGTH, -1)
-        # print(x.size())
-        # print(y.size())
         y = y.view(BATCH_SIZE * SEQUENCE_LENGTH, 6)
-        # print(y.size())
         y = self.voltage(y)
-        # print(y.size())
-        # print(f"concat: {x.size()}, {y.size()}")
         x = torch.concatenate((x, y), dim=1)
-        # print(x.size())
         x = self.params(x)
-        # print(x.size())
         x = x.view(BATCH_SIZE, SEQUENCE_LENGTH, 6)
-        # print(x.size())
         return x
 
 
 # Define Constants and Hyperparameters
-NUM_EPOCHS = 1
+NUM_EPOCHS = 30
 LEARNING_RATE = 0.01
 SEQUENCE_LENGTH = 9
 BATCH_SIZE = 5
@@ -215,27 +204,37 @@ expected_voltages = []
 with torch.no_grad():
     x, y = np.meshgrid(np.arange(-128, 128, 1), np.arange(-128, 128, 1))
 
-    for i, (image_sequence, _, voltage_sequence, norm_info) in enumerate(test_loader):
+    for i, (
+        image_sequence,
+        _,
+        voltage_sequence,
+        norm_info,
+    ) in enumerate(test_loader):
         if i == 1:
             break
-        print(np.shape(image_sequence))
-        print(np.shape(voltage_sequence))
-        print(np.shape(norm_info))
         test_image_sequence = image_sequence[:, :, 0]
+        test_volt_sequence = model(image_sequence.cuda(), voltage_sequence.cuda())
         test_voltage_sequence = voltage_sequence
         test_norm_volts = voltage_sequence * norm_info[:, :, :1] + norm_info[:, :, 1:2]
+        test_model_sequence = (
+            test_volt_sequence.cpu() * norm_info[:, :, :1] + norm_info[:, :, 1:2]
+        )
 
     x, y = np.meshgrid(np.arange(-112, 112, 1), np.arange(-112, 112, 1))
 
     for i in range(len(test_image_sequence)):
         for j in range(9):
-            plt.subplot(5, 9, j + 1)
-            plt.imshow(test_image_sequence[i, j], cmap="hot", interpolation="nearest")
+            plt.subplot(2, 9, j + 1)
+            plt.imshow(
+                elliptical_gaussian(x, y, *test_volt_sequence[i, j].numpy()),
+                cmap="hot",
+                interpolation="nearest",
+            )
 
-            plt.subplot(5, 9, j + 10)
+            plt.subplot(2, 9, j + 10)
             plt.imshow(
                 elliptical_gaussian(x, y, *test_norm_volts[i, j].numpy()),
                 cmap="hot",
                 interpolation="nearest",
             )
-    plt.show()
+        plt.show()
