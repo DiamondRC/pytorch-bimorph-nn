@@ -10,6 +10,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import torch
 import torch.share
+from generate_toy_data import elliptical_gaussian
 from torch.utils.data import DataLoader, Dataset, random_split
 
 os.system("clear")
@@ -41,7 +42,8 @@ class GaussianHDF5Dataset(Dataset):
             voltage_sequence = f["voltage_seq"][idx]
             shifted_voltage_sequence = voltage_sequence[1:]
             voltage_sequence = voltage_sequence[:-1]
-        return image_sequence, shifted_voltage_sequence, voltage_sequence
+            norm_info = f["normalisation_info"][idx]
+        return image_sequence, shifted_voltage_sequence, voltage_sequence, norm_info
 
 
 ################################
@@ -114,8 +116,8 @@ class Focusing_Sequence(torch.nn.Module):
 
 
 # Define Constants and Hyperparameters
-NUM_EPOCHS = 50
-LEARNING_RATE = 1e-2
+NUM_EPOCHS = 30
+LEARNING_RATE = 0.01
 SEQUENCE_LENGTH = 9
 BATCH_SIZE = 5
 PATH = "gaussian_2d_sequences.hdf5"
@@ -171,7 +173,7 @@ test_loader = DataLoader(
 ################################
 
 for epoch in range(NUM_EPOCHS):
-    for image_sequence, shifted_voltage_sequence, voltage_sequence in train_loader:
+    for image_sequence, shifted_voltage_sequence, voltage_sequence, _ in train_loader:
         optimizer.zero_grad()
         output = model(image_sequence.cuda(), voltage_sequence.cuda())
         loss = criterion(output, shifted_voltage_sequence.cuda())
@@ -210,18 +212,51 @@ plt.close()
 predicted_voltages = []
 expected_voltages = []
 with torch.no_grad():
-    for image_sequence, shifted_voltage_sequence, voltage_sequence in test_loader:
+    x, y = np.meshgrid(np.arange(-128, 128, 1), np.arange(-128, 128, 1))
+
+    norm_scopes = None
+    for (
+        image_sequence,
+        shifted_voltage_sequence,
+        voltage_sequence,
+        norm_info,
+    ) in test_loader:
         output = model(image_sequence.cuda(), voltage_sequence.cuda())
         predicted_voltages.append(output.cpu())
         expected_voltages.append(shifted_voltage_sequence.cpu())
-    predicted_voltages = np.asarray(predicted_voltages)
-    expected_voltages = np.asarray(expected_voltages)
-    err = expected_voltages - predicted_voltages
-    per_err = ((predicted_voltages - expected_voltages) / expected_voltages) * 100
+        norm = norm_info
+
     for _ in range(5):
-        index = random.randrange(1, 18)
-        print(f"expected_voltages:  {expected_voltages[index, 0, 0]}")
-        print(f"predicted_voltages: {predicted_voltages[index, 0, 0]}")
-        print(f"err:                {err[index, 0, 0]}")
-        print(f"per_err:            {per_err[index, 0, 0]}")
+        index = random.randrange(1, 5)
+        index_predicted_voltages = np.asarray(predicted_voltages[index])
+        index_expected_voltages = np.asarray(expected_voltages[index])
+        err = index_expected_voltages - index_predicted_voltages
+        per_err = (
+            (index_predicted_voltages - index_expected_voltages)
+            / index_expected_voltages
+        ) * 100
+        print(f"expected_voltages:  {index_expected_voltages[0, 0]}")
+        print(f"predicted_voltages: {index_predicted_voltages[0, 0]}")
+        print(f"err:                {err[0, 0]}")
+        print(f"per_err:            {per_err[0, 0]}")
         print("=========")
+
+        print(norm_info[:, 1:].size())
+        print(np.shape(index_predicted_voltages))
+
+        # Denormalise
+        index_predicted_voltages = (
+            index_predicted_voltages * norm_info[:, 1:, :1].numpy()
+            + norm_info[:, 1:, 1:2].numpy()
+        )
+
+        print(index_predicted_voltages)
+        print(predicted_voltages[index])
+        for j in range(9):
+            plt.subplot(1, 9, j + 1)
+            plt.imshow(
+                elliptical_gaussian(x, y, *index_predicted_voltages[0, j]),
+                cmap="hot",
+                interpolation="nearest",
+            )
+        plt.show()

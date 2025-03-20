@@ -90,8 +90,10 @@ def generate_gaussian2(x_0, y_0, sigma_x, sigma_y, amp, theta, SEQUENCE_LENGTH):
     volt_std = voltage_sequence.std(dim=1, keepdim=True)
     norm_voltage_sequence = (voltage_sequence - volt_mean) / (volt_std + 1e-10)
 
+    norm_info = torch.concat((volt_mean, volt_std), dim=1)
+
     # Return outputs
-    return norm_image_sequence, norm_voltage_sequence
+    return norm_image_sequence, norm_voltage_sequence, norm_info
 
 
 # Uncomment below to check validity of sequence
@@ -142,10 +144,14 @@ with h5py.File("gaussian_2d_sequences.hdf5", "w") as f:
     voltage_dataset = f.create_dataset(
         "voltage_seq", (NUM_SEQUENCES, SEQUENCE_LENGTH, 6), dtype="f"
     )
+    normalisation_dataset = f.create_dataset(
+        "normalisation_info", (NUM_SEQUENCES, 10, 2), dtype="f"
+    )
 
     for i in range(0, NUM_SEQUENCES):
-        image_sequence, voltage_sequence = generate_gaussian2(
+        image_sequence, voltage_sequence, volt_norm = generate_gaussian2(
             *generate_seed(), SEQUENCE_LENGTH
         )
         image_dataset[i] = image_sequence
         voltage_dataset[i] = voltage_sequence
+        normalisation_dataset[i] = volt_norm
