@@ -70,16 +70,8 @@ class Focusing_Sequence(torch.nn.Module):
             ),
             torch.nn.BatchNorm2d(num_features=32),
             torch.nn.LeakyReLU(),
-            # torch.nn.Dropout2d(p=0.2),
             torch.nn.MaxPool2d(kernel_size=(2, 2), stride=(2, 2)),
             #
-            torch.nn.Conv2d(
-                in_channels=32, out_channels=64, kernel_size=(3, 3), padding=1
-            ),
-            torch.nn.BatchNorm2d(num_features=64),
-            torch.nn.LeakyReLU(),
-            # torch.nn.Dropout2d(p=0.2),
-            torch.nn.MaxPool2d(kernel_size=(2, 2), stride=(2, 2)),
             torch.nn.AdaptiveAvgPool2d((1, 1)),
         )
 
@@ -88,7 +80,7 @@ class Focusing_Sequence(torch.nn.Module):
             torch.nn.LeakyReLU(),
         )
 
-        self.params = torch.nn.Linear(128, 6)
+        self.params = torch.nn.Linear(96, 6)
 
     def forward(self, x, y):
         x = x.view(BATCH_SIZE * SEQUENCE_LENGTH, 1, 224, 224)
@@ -103,7 +95,7 @@ class Focusing_Sequence(torch.nn.Module):
 
 
 # Define Constants and Hyperparameters
-NUM_EPOCHS = 100
+NUM_EPOCHS = 60
 LEARNING_RATE = 0.01
 SEQUENCE_LENGTH = 9
 BATCH_SIZE = 5
@@ -125,6 +117,7 @@ def init_weights(m):
             torch.nn.init.zeros_(m.bias)
 
 
+# Create model and send to GPU if possible
 model = Focusing_Sequence()
 model.apply(init_weights)
 
@@ -200,10 +193,11 @@ if not NUM_EPOCHS == 1:
 # Plot model prediction against truth data
 with torch.no_grad():
     for i, (_, shifted_voltage_sequence, voltage_sequence) in enumerate(test_loader):
+        # Grab only one batch from the dataloader for visual comparison.
         if i == 1:
             break
 
-        # Model out voltages
+        # Model out next voltages
         test_model_sequence = model(
             image_sequence.cuda(), voltage_sequence.cuda()
         ).cpu()
@@ -230,4 +224,20 @@ with torch.no_grad():
                 cmap="hot",
                 interpolation="nearest",
             )
+        plt.show()
+
+# Display model weights
+for name, param in model.named_parameters():
+    if param.grad is not None:
+        plt.figure(figsize=(6, 4))
+        plt.hist(
+            param.grad.cpu().view(-1).detach().numpy(),
+            bins=500,
+            alpha=0.7,
+            color="blue",
+        )
+        plt.title(f"Gradient Histogram for {name}")
+        plt.xlabel("Gradient Value")
+        plt.ylabel("Frequency")
+        plt.grid(True)
         plt.show()
