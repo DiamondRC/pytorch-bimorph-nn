@@ -41,9 +41,7 @@ class GaussianHDF5Dataset(Dataset):
             voltage_sequence = f["voltage_seq"][idx]
             shifted_voltage_sequence = voltage_sequence[1:]
             voltage_sequence = voltage_sequence[:-1]
-            norm_info = f["normalisation_info"][idx]
-            norm_info = norm_info[1:]
-        return image_sequence, shifted_voltage_sequence, voltage_sequence, norm_info
+        return image_sequence, shifted_voltage_sequence, voltage_sequence
 
 
 ################################
@@ -162,7 +160,7 @@ test_loader = DataLoader(
 ################################
 
 for epoch in range(NUM_EPOCHS):
-    for image_sequence, shifted_voltage_sequence, voltage_sequence, _ in train_loader:
+    for image_sequence, shifted_voltage_sequence, voltage_sequence in train_loader:
         optimizer.zero_grad()
         output = model(image_sequence.cuda(), voltage_sequence.cuda())
         loss = criterion(output, shifted_voltage_sequence.cuda())
@@ -201,45 +199,34 @@ if not NUM_EPOCHS == 1:
 
 # Plot model prediction against truth data
 with torch.no_grad():
-    for i, (image_sequence, _, voltage_sequence, norm_info) in enumerate(test_loader):
+    for i, (_, shifted_voltage_sequence, voltage_sequence) in enumerate(test_loader):
         if i == 1:
             break
 
         # Model out voltages
-        test_volt_sequence = model(image_sequence.cuda(), voltage_sequence.cuda())
-        test_model_sequence = (
-            test_volt_sequence.cpu() * norm_info[:, :, :1] + norm_info[:, :, 1:2]
-        )
+        test_model_sequence = model(
+            image_sequence.cuda(), voltage_sequence.cuda()
+        ).cpu()
 
-        # Data out images
-        test_image_sequence = image_sequence[:, :, 0]
-
-        # Data out voltages
-        test_norm_volts = voltage_sequence * norm_info[:, :, :1] + norm_info[:, :, 1:2]
+        # Data out next voltages
+        test_shifted_voltages = shifted_voltage_sequence
 
     # Create fixed grid for plotting
     X, Y = np.meshgrid(np.arange(-112, 112, 1), np.arange(-112, 112, 1))
 
-    for i in range(len(test_image_sequence)):
+    for i in range(len(test_shifted_voltages)):
         for j in range(9):
             # Model prediction
-            plt.subplot(3, 9, j + 1)
+            ax1 = plt.subplot(2, 9, j + 1)
             plt.imshow(
                 elliptical_gaussian(X, Y, *test_model_sequence[i, j].numpy()),
                 cmap="hot",
                 interpolation="nearest",
             )
-            # Data truth
-            plt.subplot(3, 9, j + 10)
+            # Data next voltage
+            ax1 = plt.subplot(2, 9, j + 10)
             plt.imshow(
-                image_sequence[i, j, 0],
-                cmap="hot",
-                interpolation="nearest",
-            )
-            # Data out voltages
-            plt.subplot(3, 9, j + 19)
-            plt.imshow(
-                elliptical_gaussian(X, Y, *test_norm_volts[i, j].numpy()),
+                elliptical_gaussian(X, Y, *test_shifted_voltages[i, j].numpy()),
                 cmap="hot",
                 interpolation="nearest",
             )
