@@ -105,7 +105,7 @@ class Focusing_Sequence(torch.nn.Module):
 
 
 # Define Constants and Hyperparameters
-NUM_EPOCHS = 30
+NUM_EPOCHS = 100
 LEARNING_RATE = 0.01
 SEQUENCE_LENGTH = 9
 BATCH_SIZE = 5
@@ -169,6 +169,7 @@ for epoch in range(NUM_EPOCHS):
         loss.backward()
         torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
         optimizer.step()
+
     if epoch % 5 == 0:
         print(f"Epoch: {epoch} Loss: {loss.data}")
     loss_data.append(loss.cpu().detach().numpy())
@@ -198,37 +199,47 @@ if not NUM_EPOCHS == 1:
     plt.show()
     plt.close()
 
-# Plot model against truth
-predicted_voltages = []
-expected_voltages = []
+# Plot model prediction against truth data
 with torch.no_grad():
-    x, y = np.meshgrid(np.arange(-128, 128, 1), np.arange(-128, 128, 1))
-
     for i, (image_sequence, _, voltage_sequence, norm_info) in enumerate(test_loader):
         if i == 1:
             break
-        test_image_sequence = image_sequence[:, :, 0]
+
+        # Model out voltages
         test_volt_sequence = model(image_sequence.cuda(), voltage_sequence.cuda())
-        test_voltage_sequence = voltage_sequence
-        test_norm_volts = voltage_sequence * norm_info[:, :, :1] + norm_info[:, :, 1:2]
         test_model_sequence = (
             test_volt_sequence.cpu() * norm_info[:, :, :1] + norm_info[:, :, 1:2]
         )
 
-    x, y = np.meshgrid(np.arange(-112, 112, 1), np.arange(-112, 112, 1))
+        # Data out images
+        test_image_sequence = image_sequence[:, :, 0]
+
+        # Data out voltages
+        test_norm_volts = voltage_sequence * norm_info[:, :, :1] + norm_info[:, :, 1:2]
+
+    # Create fixed grid for plotting
+    X, Y = np.meshgrid(np.arange(-112, 112, 1), np.arange(-112, 112, 1))
 
     for i in range(len(test_image_sequence)):
         for j in range(9):
-            plt.subplot(2, 9, j + 1)
+            # Model prediction
+            plt.subplot(3, 9, j + 1)
             plt.imshow(
-                elliptical_gaussian(x, y, *test_volt_sequence[i, j].numpy()),
+                elliptical_gaussian(X, Y, *test_model_sequence[i, j].numpy()),
                 cmap="hot",
                 interpolation="nearest",
             )
-
-            plt.subplot(2, 9, j + 10)
+            # Data truth
+            plt.subplot(3, 9, j + 10)
             plt.imshow(
-                elliptical_gaussian(x, y, *test_norm_volts[i, j].numpy()),
+                image_sequence[i, j, 0],
+                cmap="hot",
+                interpolation="nearest",
+            )
+            # Data out voltages
+            plt.subplot(3, 9, j + 19)
+            plt.imshow(
+                elliptical_gaussian(X, Y, *test_norm_volts[i, j].numpy()),
                 cmap="hot",
                 interpolation="nearest",
             )
