@@ -1,11 +1,12 @@
 #######################################################################
-# i22 Bimorph Mirror Focusing - pyTorch Neural Network
+# i22 Bimorph Mirror Focusing - PyTorch Neural Network
 #######################################################################
 
 import os
 import re
 
 import h5py
+import matplotlib.pyplot as plt
 import numpy as np
 import torch
 from torch import tensor
@@ -36,7 +37,6 @@ def pair_files(PATH):
 
     for f in files:
         match = re.match(rf"{BEAMLINE}-(\d+).*", f)
-        #  + re.escape(".h5")
         if match:
             # Extract number from filename
             num = match.group(1)
@@ -85,19 +85,6 @@ def pair_files(PATH):
     return valid_pairs
 
 
-PATH = "/dls/i22/data/2025/nr40718-1/"
-HFM_CHANNEL_NO = 12
-VFM_CHANNEL_NO = 32
-SEQUENCE_LENGTH = 15
-DETECTOR_RES = (2464, 2056)
-TRAIN_RATIO = 0.70
-VAL_RATIO = 0.15
-BATCH_SIZE = 8
-NUM_EPOCHS = 1
-BEAMLINE = "i22"
-PAIRED_FILES = pair_files(PATH)
-
-
 class BimorphHDF5Dataset(Dataset):
     def __init__(self):
         self.file_root = PATH
@@ -108,26 +95,111 @@ class BimorphHDF5Dataset(Dataset):
         return len(self.paired_files)
 
     def __getitem__(self, idx):
-        image_sequence_out = np.empty(shape=(SEQUENCE_LENGTH, 1, *DETECTOR_RES))
-        volt_sequence_out = np.empty(
-            shape=(SEQUENCE_LENGTH, VFM_CHANNEL_NO + HFM_CHANNEL_NO)
+        image_sequence = np.empty(shape=(SEQUENCE_LENGTH, 1, *DETECTOR_RES), dtype="f")
+        volt_sequence = np.empty(
+            shape=(SEQUENCE_LENGTH, VFM_CHANNEL_NO + HFM_CHANNEL_NO), dtype="f"
+        )
+        shifted_volt_sequence = np.empty(
+            shape=(SEQUENCE_LENGTH, VFM_CHANNEL_NO + HFM_CHANNEL_NO), dtype="f"
         )
         nexus, h5 = self.paired_files[idx]
         with h5py.File(nexus, "r") as f:
             for item in range(1, VFM_CHANNEL_NO + 1):
-                volt_sequence_out[:, item - 1] = f[
+                volt_sequence[:, item - 1] = f[
                     f"entry/instrument/bimorph_vfm/channels-{item}-output_voltage"
                 ]
             for item in range(1, HFM_CHANNEL_NO + 1):
-                volt_sequence_out[:, VFM_CHANNEL_NO + item - 1] = f[
+                volt_sequence[:, VFM_CHANNEL_NO + item - 1] = f[
                     f"entry/instrument/bimorph_hfm/channels-{item}-output_voltage"
                 ]
 
+        cut_volt_sequence = volt_sequence[1:]
+        shifted_volt_sequence = np.concatenate(
+            (cut_volt_sequence, FOCUSED_CHANNEL_VOLTAGES), axis=0, dtype="f"
+        )
+
         with h5py.File(h5, "r") as f:
-            image_sequence_out[:, 0, :, :] = f["entry/data/data"]
+            image_sequence[:, 0, :, :] = f["entry/data/data"]
 
-        return tensor(image_sequence_out), tensor(volt_sequence_out)
+        return (
+            tensor(image_sequence),
+            tensor(volt_sequence),
+            tensor(shifted_volt_sequence),
+        )
 
+
+################################
+# Hyperparams
+################################
+
+# Data
+PATH = "/dls/i22/data/2025/nr40718-1/"
+HFM_CHANNEL_NO = 12
+VFM_CHANNEL_NO = 32
+SEQUENCE_LENGTH = 15
+DETECTOR_RES = (2464, 2056)
+TRAIN_RATIO = 0.70
+VAL_RATIO = 0.15
+BEAMLINE = "i22"
+PAIRED_FILES = pair_files(PATH)
+FOCUSED_CHANNEL_VOLTAGES = np.array(
+    [
+        500,
+        500,
+        91,
+        -203,
+        20,
+        33,
+        -53,
+        44,
+        -196,
+        -142,
+        -214,
+        -454,
+        -89,
+        -35,
+        -129,
+        -150,
+        -83,
+        -93,
+        104,
+        -305,
+        -500,
+        -29,
+        -33,
+        -52,
+        128,
+        11,
+        -24,
+        139,
+        -198,
+        -9,
+        144,
+        380,
+        -214,
+        -320,
+        -317,
+        -324,
+        -382,
+        -272,
+        -284,
+        -232,
+        -322,
+        -428,
+        -214,
+        -216,
+    ]
+).reshape(1, -1)
+
+# Model
+BATCH_SIZE = 2
+NUM_EPOCHS = 10
+LEARNING_RATE = 2e-4
+
+
+################################
+# Dataloaders
+################################
 
 # Split up the training data into training, validation and testing datasets.
 print("Beginning file loading...")
@@ -153,132 +225,110 @@ test_loader = DataLoader(
 
 
 ################################
+# Model
+################################
+
+
+class Bimorph_Focusing(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.image_conv = torch.nn.Sequential(
+            torch.nn.AvgPool2d(2, 2),
+            torch.nn.Conv2d(
+                in_channels=1, out_channels=16, kernel_size=(5, 5), padding=2
+            ),
+            torch.nn.BatchNorm2d(num_features=16),
+            torch.nn.LeakyReLU(),
+            torch.nn.AvgPool2d(2, 2),
+            #
+            torch.nn.Conv2d(
+                in_channels=16, out_channels=32, kernel_size=(3, 3), padding=1
+            ),
+            torch.nn.BatchNorm2d(num_features=32),
+            torch.nn.LeakyReLU(),
+            # torch.nn.Dropout2d(p=0.2),
+            torch.nn.AvgPool2d(2, 2),
+            #
+            # torch.nn.Conv2d(
+            #    in_channels=32, out_channels=64, kernel_size=(3, 3), padding=1
+            # ),
+            # torch.nn.BatchNorm2d(num_features=64),
+            # torch.nn.LeakyReLU(),
+            # torch.nn.Dropout2d(p=0.2),
+            #
+            torch.nn.AdaptiveAvgPool2d((1, 1)),
+        )
+
+        self.features_to_channels = torch.nn.Linear(32, HFM_CHANNEL_NO + VFM_CHANNEL_NO)
+
+    def forward(self, images):
+        batch = images.size()[0]
+        x = images.view(batch * SEQUENCE_LENGTH, 1, *DETECTOR_RES)
+        x = self.image_conv(x)
+        x = x.view(batch, SEQUENCE_LENGTH, -1)
+        x = self.features_to_channels(x)
+        return x
+
+
+# Pre-set weights in all model layers.
+def init_weights(m):
+    if isinstance(m, torch.nn.Conv2d) or isinstance(m, torch.nn.Linear):
+        torch.nn.init.kaiming_normal_(
+            m.weight, mode="fan_in", nonlinearity="leaky_relu"
+        )
+        if m.bias is not None:
+            torch.nn.init.zeros_(m.bias)
+
+
+# Create model and send to GPU if possible.
+model = Bimorph_Focusing()
+model.apply(init_weights)
+
+if torch.cuda.is_available():
+    model.to("cuda")
+
+# Define loss, optimiser and run parameters.
+criterion = torch.nn.MSELoss()
+optimizer = torch.optim.Adam(model.parameters(), lr=LEARNING_RATE)
+
+
+################################
 # Training
 ################################
 
+loss_data = []
+
+# Currently setup to map image features to channels.
+# Could include voltage information at the current step.
+
 # Training loop.
-# print("Training...")
-# for epoch in range(NUM_EPOCHS):
-#     for image_sequence_out, volt_sequence_out in train_loader:
-#         ...
-# print("Training... DONE")
+print("Training...")
+for epoch in range(NUM_EPOCHS):
+    for image_sequence, _voltage_sequence, shifted_voltage_sequence in train_loader:
+        optimizer.zero_grad()
+        output = model(image_sequence.cuda())
+        loss = criterion(output, shifted_voltage_sequence.cuda())
+        loss.backward()
+        torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
+        optimizer.step()
+
+    if epoch % 5 == 0:
+        print(f"Epoch: {epoch} Loss: {loss.data}")
+    loss_data.append(loss.cpu().detach().numpy())
+print("Training... DONE")
 
 
-# ################################
-# # Model
-# ################################
+################################
+# Testing
+################################
 
+# Prepare model for testing.
+model.eval()
 
-# class Bimorph_Focusing(torch.nn.Module):
-#     def __init__(self):
-#         super().__init__()
-
-#         # Extract beam features from the detector with a 2D Convolutional Network.
-#         self.image_conv = torch.nn.Sequential(
-#             torch.nn.AvgPool2d(2, 2),
-#             torch.nn.Conv2d(
-#                 in_channels=1, out_channels=16, kernel_size=(5, 5), padding=2
-#             ),
-#             torch.nn.BatchNorm2d(num_features=16),
-#             torch.nn.LeakyReLU(),
-#             torch.nn.AvgPool2d(2, 2),
-#             #
-#             torch.nn.Conv2d(
-#                 in_channels=16, out_channels=32, kernel_size=(3, 3), padding=1
-#             ),
-#             torch.nn.BatchNorm2d(num_features=32),
-#             torch.nn.LeakyReLU(),
-#             torch.nn.Dropout2d(p=0.2),
-#             torch.nn.AvgPool2d(2, 2),
-#             torch.nn.Conv2d(
-#                 in_channels=32, out_channels=64, kernel_size=(3, 3), padding=1
-#             ),
-#             torch.nn.BatchNorm2d(num_features=64),
-#             torch.nn.LeakyReLU(),
-#             torch.nn.Dropout2d(p=0.2),
-#             torch.nn.AvgPool2d(2, 2),
-#             #
-#             torch.nn.Conv2d(
-#                 in_channels=64, out_channels=64, kernel_size=(3, 3), padding=1
-#             ),
-#             torch.nn.BatchNorm2d(num_features=64),
-#             torch.nn.LeakyReLU(),
-#             torch.nn.Dropout2d(p=0.2),
-#             torch.nn.AvgPool2d(2, 2),
-#             #
-#             torch.nn.Conv2d(
-#                 in_channels=64, out_channels=64, kernel_size=(3, 3), padding=1
-#             ),
-#             torch.nn.BatchNorm2d(num_features=64),
-#             torch.nn.LeakyReLU(),
-#             torch.nn.Dropout2d(p=0.2),
-#             torch.nn.AvgPool2d(2, 2),
-#             #
-#             torch.nn.Conv2d(
-#                 in_channels=64, out_channels=128, kernel_size=(3, 3), padding=1
-#             ),
-#             torch.nn.BatchNorm2d(num_features=128),
-#             torch.nn.LeakyReLU(),
-#             torch.nn.Dropout2d(p=0.2),
-#             #
-#             torch.nn.Conv2d(
-#                 in_channels=128, out_channels=128, kernel_size=(3, 3), padding=1
-#             ),
-#             torch.nn.BatchNorm2d(num_features=128),
-#             torch.nn.LeakyReLU(),
-#             torch.nn.Dropout2d(p=0.2),
-#             torch.nn.AvgPool2d(2, 2),
-#             #
-#             # torch.nn.AdaptiveAvgPool2d((1, 1)),
-#         )
-
-#         self.attention = torch.nn.MultiheadAttention(
-#             embed_dim=8192, num_heads=32, batch_first=False
-#         )
-
-#         # self.fully_connected = torch.nn.Linear(hidden_size, 44)
-#         self.fully_connected = torch.nn.Linear(8192, 44)
-
-#     def forward(self, images, voltages):
-
-#         atten_out, _ = self.attention(image_features, image_features, image_features)
-
-#         out = self.fully_connected(atten_out[:, -1, :])
-
-#         return out
-
-
-# # Pre-set weights in all model layers.
-# def init_weights(m):
-#     if isinstance(m, torch.nn.Conv2d) or isinstance(m, torch.nn.Linear):
-#         torch.nn.init.kaiming_normal_(
-#             m.weight, mode="fan_in", nonlinearity="leaky_relu"
-#         )
-#         if m.bias is not None:
-#             torch.nn.init.zeros_(m.bias)
-
-# # Define loss, optimiser and run parameters.
-# model = Bimorph_Focusing()
-# model.apply(init_weights)
-
-# if torch.cuda.is_available():
-#     model.to("cuda")
-
-# # Define loss, optimiser and run parameters.
-# criterion = torch.nn.MSELoss()
-# optimizer = torch.optim.AdamW(model.parameters(), lr=1e-4)
-
-# data_size = 10
-# losses = []
-# layers = []
-# grads = []
-
-
-# ################################
-# # Training
-# ################################
-
-
-# ################################
-# # Testing
-# ################################
+# Display loss.
+if not NUM_EPOCHS == 1:
+    plt.plot(range(NUM_EPOCHS), loss_data)
+    plt.ylabel("Loss")
+    plt.xlabel("Epochs")
+    plt.show()
+    plt.close()
