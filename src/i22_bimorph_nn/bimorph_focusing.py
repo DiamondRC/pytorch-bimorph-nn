@@ -25,12 +25,12 @@ else:
 ################################
 
 
-def pair_files(PATH):
+def pair_files(path):
     print("Beginning file checks...")
     # Only interested in nexus or h5 files
     files = [
         file
-        for file in os.listdir(PATH)
+        for file in os.listdir(path)
         if file.endswith(".nxs") or file.endswith(".h5")
     ]
     file_dict = {}
@@ -46,15 +46,15 @@ def pair_files(PATH):
             # Add file to associated number
             file_dict[num].append(f)
 
-    mega_comp = [
-        (os.path.join(PATH, f1), os.path.join(PATH, f2))
+    return_paired_files = [
+        (os.path.join(path, f1), os.path.join(path, f2))
         for _, file_list in file_dict.items()  # Grab each item in the pair dict
         if len(file_list) == 2  # Check if there's two files for the number
         for f1, f2 in [file_list]
     ]  # Select the two files and return path
 
     valid_pairs = []
-    for pair in mega_comp:
+    for pair in return_paired_files:
         # Order files in dict
         fail = False
         h5 = str
