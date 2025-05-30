@@ -9,6 +9,7 @@ import h5py
 import matplotlib.pyplot as plt
 import numpy as np
 import torch
+import torch.optim.lr_scheduler as lr_scheduler
 from torch import tensor
 from torch.utils.data import DataLoader, Dataset, random_split
 
@@ -193,9 +194,12 @@ FOCUSED_CHANNEL_VOLTAGES = np.array(
 
 # Model
 BATCH_SIZE = 2
-NUM_EPOCHS = 10
 LEARNING_RATE = 2e-4
+LEARNING_RATE_PATIENCE = 10
+NUM_EPOCHS = 10
 
+loss_data = []
+val_data = []
 
 ################################
 # Dataloaders
@@ -246,15 +250,15 @@ class Bimorph_Focusing(torch.nn.Module):
             ),
             torch.nn.BatchNorm2d(num_features=32),
             torch.nn.LeakyReLU(),
-            # torch.nn.Dropout2d(p=0.2),
+            torch.nn.Dropout2d(p=0.2),
             torch.nn.AvgPool2d(2, 2),
             #
-            # torch.nn.Conv2d(
-            #    in_channels=32, out_channels=64, kernel_size=(3, 3), padding=1
-            # ),
-            # torch.nn.BatchNorm2d(num_features=64),
-            # torch.nn.LeakyReLU(),
-            # torch.nn.Dropout2d(p=0.2),
+            torch.nn.Conv2d(
+                in_channels=32, out_channels=64, kernel_size=(3, 3), padding=1
+            ),
+            torch.nn.BatchNorm2d(num_features=64),
+            torch.nn.LeakyReLU(),
+            torch.nn.Dropout2d(p=0.2),
             #
             torch.nn.AdaptiveAvgPool2d((1, 1)),
         )
@@ -290,20 +294,28 @@ if torch.cuda.is_available():
 # Define loss, optimiser and run parameters.
 criterion = torch.nn.MSELoss()
 optimizer = torch.optim.Adam(model.parameters(), lr=LEARNING_RATE)
-
+scheduler = lr_scheduler.ReduceLROnPlateau(
+    optimizer, mode="min", factor=0.1, patience=LEARNING_RATE_PATIENCE
+)
 
 ################################
 # Training
 ################################
 
-loss_data = []
-
-# Currently setup to map image features to channels.
-# Could include voltage information at the current step.
+# Early stopping.
+best_epoch = -1
+best_val_loss = float("inf")
 
 # Training loop.
 print("Training...")
 for epoch in range(NUM_EPOCHS):
+    running_loss = 0.0
+    num_samples = 0.0
+    val_loss = 0.0
+    num_val_samples = 0.0
+
+    # Train the model.
+    model.train()
     for image_sequence, _voltage_sequence, shifted_voltage_sequence in train_loader:
         optimizer.zero_grad()
         output = model(image_sequence.cuda())
@@ -312,9 +324,46 @@ for epoch in range(NUM_EPOCHS):
         torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
         optimizer.step()
 
-    if epoch % 5 == 0:
-        print(f"Epoch: {epoch} Loss: {loss.data}")
-    loss_data.append(loss.cpu().detach().numpy())
+        # Store batch training loss.
+        batch_size = image_sequence.size(0)
+        running_loss += loss.item() * batch_size
+        num_samples += batch_size
+
+    # Compute total loss for the epoch.
+    epoch_loss = running_loss / num_samples
+
+    # Validation test, adjust learning rate.
+    model.eval()
+    with torch.no_grad():
+        for (
+            val_image_sequence,
+            _val_voltage_sequence,
+            val_shifted_voltage_sequence,
+        ) in val_loader:
+            val_output = model(val_image_sequence.cuda())
+            loss = criterion(val_output, val_shifted_voltage_sequence.cuda())
+
+            # Store batch validation loss.
+            batch_size = val_image_sequence.size(0)
+            val_loss += loss.item() * batch_size
+            num_val_samples += batch_size
+
+    # Compute average loss across the batch.
+    val_loss = val_loss / num_val_samples
+
+    scheduler.step(val_loss)
+
+    # Return training information.
+    lr = optimizer.param_groups[0]["lr"]
+    if epoch % 1 == 0:
+        print(
+            f"Epoch: [{epoch}/{NUM_EPOCHS - 1}], "
+            f"Training Loss: {epoch_loss}, "
+            f"Val Loss: {val_loss}, Lr: {lr:.6f}"
+        )
+    loss_data.append(epoch_loss)
+    val_data.append(val_loss)
+
 print("Training... DONE")
 
 
